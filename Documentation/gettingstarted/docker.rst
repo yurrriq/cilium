@@ -79,11 +79,15 @@ it using the ``cilium`` CLI client. Check the status of the agent by running
 ::
 
     $ cilium status
-    KVStore:            Ok         Consul: 172.18.0.2:8300
-    ContainerRuntime:   Ok
-    Kubernetes:         Disabled
-    Cilium:             Ok         OK
-    NodeMonitor:        Listening for events on 1 CPUs with 64x4096 of shared memory
+    KVStore:                Ok         Consul: 172.18.0.2:8300
+    ContainerRuntime:       Ok         
+    Kubernetes:             Disabled   
+    Cilium:                 Ok         OK
+    NodeMonitor:            Listening for events on 1 CPUs with 64x4096 of shared memory
+    Cilium health daemon:   Ok   
+    Controller Status:      3/3 healthy
+    Proxy Status:           OK, ip 10.15.28.238, 0 redirects, port-range 10000-20000
+    Cluster health:   1/1 reachable   (2018-03-08T22:19:44Z)
 
 The status indicates that all components are operational with the Kubernetes
 integration currently being disabled.

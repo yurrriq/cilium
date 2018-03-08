@@ -95,17 +95,12 @@ status``:
 
 ::
 
-    $ cilium status
-    Allocated IPv4 addresses:
-     10.15.28.238
-     10.15.247.232
-    Allocated IPv6 addresses:
-     f00d::a00:20f:0:1
-     f00d::a00:20f:0:8ad6
-    KVStore:            Ok         Consul: 172.18.0.2:8300
-    ContainerRuntime:   Ok
+    $cilium status
+    KVStore:                Ok         Consul: 172.18.0.2:8300
+    ContainerRuntime:       Ok         
     ...
-    Cilium:             Ok
+    Cilium:                 Ok         OK
+    ...
 
 The status indicates that all necessary components are operational.
 
