@@ -9,12 +9,15 @@ cilium_tag = (ENV['CILIUM_TAG'] || "v1.0.0-rc7")
 
 # This runs only once when vagrant box is provisioned for the first time
 $bootstrap = <<SCRIPT
+
 # install docker-compose
-curl -sS -L "https://github.com/docker/compose/releases/download/1.11.2/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+echo "installing docker compose"
+curl -sS -L "https://github.com/docker/compose/releases/download/1.11.2/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose || echo "Error downloading https://github.com/docker/compose/releases/download/1.11.2/docker-compose-$(uname -s)-$(uname -m)"
 chmod +x /usr/local/bin/docker-compose
 
 # install cilium client
-curl -sS -L "http://releases.cilium.io/#{cilium_version}/cilium-x86_64" -o /usr/local/bin/cilium
+echo "installing Cilium client"
+curl -sS -L --fail "http://releases.cilium.io/#{cilium_version}/cilium-x86_64" -o /usr/local/bin/cilium || echo "Error downloading http://releases.cilium.io/#{cilium_version}/cilium-x86_64"
 chmod +x /usr/local/bin/cilium
 
 # Store specified tag and options for docker-compose so we can rerun easily
