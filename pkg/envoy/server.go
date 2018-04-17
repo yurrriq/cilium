@@ -259,7 +259,7 @@ func (s *XDSServer) stop() {
 	os.Remove(s.socketPath)
 }
 
-func getHTTPRule(h *api.PortRuleHTTP) (headers []*envoy_api_v2_route.HeaderMatcher, ruleRef string) {
+func GetHTTPRule(h *api.PortRuleHTTP) (headers []*envoy_api_v2_route.HeaderMatcher, ruleRef string) {
 	// Count the number of header matches we need
 	cnt := len(h.Headers)
 	if h.Path != "" {
@@ -421,7 +421,7 @@ func getPortNetworkPolicyRule(sel api.EndpointSelector, l7Parser policy.L7Parser
 		if len(l7Rules.HTTP) > 0 { // Just cautious. This should never be false.
 			httpRules := make([]*cilium.HttpNetworkPolicyRule, 0, len(l7Rules.HTTP))
 			for _, l7 := range l7Rules.HTTP {
-				headers, _ := getHTTPRule(&l7)
+				headers, _ := GetHTTPRule(&l7)
 				httpRules = append(httpRules, &cilium.HttpNetworkPolicyRule{Headers: headers})
 			}
 			SortHTTPNetworkPolicyRules(httpRules)

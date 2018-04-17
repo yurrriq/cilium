@@ -17,6 +17,20 @@ package labels
 // LabelArray is an array of labels forming a set
 type LabelArray []*Label
 
+/*func (l LabelArray) SHA256Sum() string {
+		return fmt.Sprintf("%x", sha512.Sum512_256(l.SortedList()))
+	}
+}*/
+
+func (ls LabelArray) ToLabels() Labels {
+	labels := make(map[string]*Label)
+	for _, label := range ls {
+		lblCopy := label.DeepCopy()
+		labels[label.Key] = lblCopy
+	}
+	return labels
+}
+
 // ParseLabelArray parses a list of labels and returns a LabelArray
 func ParseLabelArray(labels ...string) LabelArray {
 	array := make([]*Label, len(labels))
