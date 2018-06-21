@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package envoy
+package sort
 
 import (
 	"github.com/cilium/cilium/pkg/envoy/cilium"
