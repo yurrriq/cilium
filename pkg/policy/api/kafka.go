@@ -291,3 +291,19 @@ func (kr *PortRuleKafka) MapRoleToAPIKey() error {
 		return fmt.Errorf("Invalid Kafka Role %s", kr.Role)
 	}
 }
+
+func (kr *PortRuleKafka) RoleToAPIKeys() (KafkaRole, error) {
+	var apiKeys KafkaRole
+	switch strings.ToLower(kr.Role) {
+	case ProduceRole:
+		apiKeys = KafkaRole{ProduceKey, MetadataKey, APIVersionsKey}
+		return apiKeys, nil
+	case ConsumeRole:
+		apiKeys = KafkaRole{FetchKey, OffsetsKey, MetadataKey,
+			OffsetCommitKey, OffsetFetchKey, FindCoordinatorKey,
+			JoinGroupKey, HeartbeatKey, LeaveGroupKey, SyncgroupKey, APIVersionsKey}
+		return apiKeys, nil
+	default:
+		return nil, fmt.Errorf("Invalid Kafka Role %s", kr.Role)
+	}
+}
