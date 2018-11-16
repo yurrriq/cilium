@@ -63,8 +63,7 @@ type traceState struct {
 	ruleID int
 }
 
-func (state *traceState) trace(p *Repository, ctx *SearchContext) {
-	ctx.PolicyTrace("%d/%d rules selected\n", state.selectedRules, len(p.rules))
+func (state *traceState) trace(ctx *SearchContext) {
 	if state.constrainedRules > 0 {
 		ctx.PolicyTrace("Found unsatisfied FromRequires constraint\n")
 	} else if state.matchedRules > 0 {
@@ -73,6 +72,17 @@ func (state *traceState) trace(p *Repository, ctx *SearchContext) {
 		ctx.PolicyTrace("Found no allow rule\n")
 	}
 }
+
+/*func (state *traceState) trace(p *Repository, ctx *SearchContext) {
+	ctx.PolicyTrace("%d/%d rules selected\n", state.selectedRules, len(p.rules))
+	if state.constrainedRules > 0 {
+		ctx.PolicyTrace("Found unsatisfied FromRequires constraint\n")
+	} else if state.matchedRules > 0 {
+		ctx.PolicyTrace("Found allow rule\n")
+	} else {
+		ctx.PolicyTrace("Found no allow rule\n")
+	}
+}*/
 
 // CanReachIngressRLocked evaluates the policy repository for the provided search
 // context and returns the verdict or api.Undecided if no rule matches for
@@ -99,7 +109,7 @@ loop:
 		}
 	}
 
-	state.trace(p, ctx)
+	state.trace(ctx)
 
 	return decision
 }
@@ -162,6 +172,70 @@ func wildcardL3L4Rule(proto api.L4Proto, port int, endpoints api.EndpointSelecto
 		filter.Endpoints = append(filter.Endpoints, endpoints...)
 		filter.DerivedFromRules = append(filter.DerivedFromRules, ruleLabels)
 		l4Policy[k] = filter
+	}
+}
+
+// wildcardL3L4Rules updates each ingress L7 rule to allow at L7 all traffic that
+// is allowed at L3-only or L3/L4.
+func wildcardL3L4Rules(rules api.Rules, ctx *SearchContext, ingress bool, l4Policy L4PolicyMap) {
+	// Duplicate L3-only rules into wildcard L7 rules.
+	for _, r := range rules {
+		if ingress {
+
+			for _, rule := range r.Ingress {
+				// Non-label-based rule. Ignore.
+				if !rule.IsLabelBased() {
+					continue
+				}
+
+				fromEndpoints := rule.GetSourceEndpointSelectors()
+				ruleLabels := r.Labels.DeepCopy()
+
+				// L3-only rule.
+				if len(rule.ToPorts) == 0 {
+					wildcardL3L4Rule(api.ProtoTCP, 0, fromEndpoints, ruleLabels, l4Policy)
+					wildcardL3L4Rule(api.ProtoUDP, 0, fromEndpoints, ruleLabels, l4Policy)
+				} else {
+					for _, toPort := range rule.ToPorts {
+						// L3/L4-only rule
+						if toPort.Rules.IsEmpty() {
+							for _, p := range toPort.Ports {
+								// Already validated via PortRule.Validate().
+								port, _ := strconv.ParseUint(p.Port, 0, 16)
+								wildcardL3L4Rule(p.Protocol, int(port), fromEndpoints, ruleLabels, l4Policy)
+							}
+						}
+					}
+				}
+			}
+		} else {
+			for _, rule := range r.Egress {
+				// Non-label-based rule. Ignore.
+				if !rule.IsLabelBased() {
+					continue
+				}
+
+				toEndpoints := rule.GetDestinationEndpointSelectors()
+				ruleLabels := r.Labels.DeepCopy()
+
+				// L3-only rule.
+				if len(rule.ToPorts) == 0 {
+					wildcardL3L4Rule(api.ProtoTCP, 0, toEndpoints, ruleLabels, l4Policy)
+					wildcardL3L4Rule(api.ProtoUDP, 0, toEndpoints, ruleLabels, l4Policy)
+				} else {
+					for _, toPort := range rule.ToPorts {
+						// L3/L4-only rule
+						if toPort.Rules.IsEmpty() {
+							for _, p := range toPort.Ports {
+								// Already validated via PortRule.Validate().
+								port, _ := strconv.ParseUint(p.Port, 0, 16)
+								wildcardL3L4Rule(p.Protocol, int(port), toEndpoints, ruleLabels, l4Policy)
+							}
+						}
+					}
+				}
+			}
+		}
 	}
 }
 
@@ -242,6 +316,53 @@ func (p *Repository) wildcardL3L4Rules(ctx *SearchContext, ingress bool, l4Polic
 // rule found in the repository takes precedence.
 //
 // TODO: Coalesce l7 rules?
+func ResolveL4IngressPolicy(rules api.Rules, ctx *SearchContext) (*L4PolicyMap, error) {
+	result := NewL4Policy()
+
+	ctx.PolicyTrace("\n")
+	ctx.PolicyTrace("Resolving ingress port policy for %+v\n", ctx.To)
+
+	state := traceState{}
+	var requirements []v1.LabelSelectorRequirement
+
+	// Iterate over all FromRequires which select ctx.To. These requirements
+	// will be appended to each EndpointSelector's MatchExpressions in
+	// each FromEndpoints for all ingress rules. This ensures that FromRequires
+	// is taken into account when evaluating policy at L4.
+	for _, r := range rules {
+		for _, ingressRule := range r.Ingress {
+			for _, requirement := range ingressRule.FromRequires {
+				requirements = append(requirements, requirement.ConvertToLabelSelectorRequirementSlice()...)
+			}
+		}
+	}
+
+	for _, r := range rules {
+		hiddenRule := rule{*r}
+		found, err := hiddenRule.resolveL4IngressPolicy(ctx, &state, result, requirements)
+		if err != nil {
+			return nil, err
+		}
+		state.ruleID++
+		if found != nil {
+			state.matchedRules++
+		}
+	}
+
+	wildcardL3L4Rules(rules, ctx, true, result.Ingress)
+
+	state.trace(ctx)
+	return &result.Ingress, nil
+}
+
+// ResolveL4IngressPolicy resolves the L4 ingress policy for a set of endpoints
+// by searching the policy repository for `PortRule` rules that are attached to
+// a `Rule` where the EndpointSelector matches `ctx.To`. `ctx.From` takes no effect and
+// is ignored in the search.  If multiple `PortRule` rules are found, all rules
+// are merged together. If rules contains overlapping port definitions, the first
+// rule found in the repository takes precedence.
+//
+// TODO: Coalesce l7 rules?
 func (p *Repository) ResolveL4IngressPolicy(ctx *SearchContext) (*L4PolicyMap, error) {
 	result := NewL4Policy()
 
@@ -278,8 +399,54 @@ func (p *Repository) ResolveL4IngressPolicy(ctx *SearchContext) (*L4PolicyMap, e
 
 	p.wildcardL3L4Rules(ctx, true, result.Ingress)
 
-	state.trace(p, ctx)
+	state.trace(ctx)
 	return &result.Ingress, nil
+}
+
+// ResolveL4EgressPolicy resolves the L4 egress policy for a set of endpoints
+// by searching the policy repository for `PortRule` rules that are attached to
+// a `Rule` where the EndpointSelector matches `ctx.From`. `ctx.To` takes no effect and
+// is ignored in the search.  If multiple `PortRule` rules are found, all rules
+// are merged together. If rules contains overlapping port definitions, the first
+// rule found in the repository takes precedence.
+func ResolveL4EgressPolicy(rules api.Rules, ctx *SearchContext) (*L4PolicyMap, error) {
+	result := NewL4Policy()
+
+	ctx.PolicyTrace("\n")
+	ctx.PolicyTrace("Resolving egress port policy for %+v\n", ctx.To)
+
+	var requirements []v1.LabelSelectorRequirement
+
+	// Iterate over all ToRequires which select ctx.To. These requirements will
+	// be appended to each EndpointSelector's MatchExpressions in each
+	// ToEndpoints for all ingress rules. This ensures that ToRequires is
+	// taken into account when evaluating policy at L4.
+	for _, r := range rules {
+		for _, egressRule := range r.Egress {
+			for _, requirement := range egressRule.ToRequires {
+				requirements = append(requirements, requirement.ConvertToLabelSelectorRequirementSlice()...)
+			}
+		}
+	}
+
+	state := traceState{}
+	for i, r := range rules {
+		state.ruleID = i
+		hiddenRule := rule{*r}
+		found, err := hiddenRule.resolveL4EgressPolicy(ctx, &state, result, requirements)
+		if err != nil {
+			return nil, err
+		}
+		state.ruleID++
+		if found != nil {
+			state.matchedRules++
+		}
+	}
+
+	wildcardL3L4Rules(rules, ctx, false, result.Egress)
+
+	state.trace(ctx)
+	return &result.Egress, nil
 }
 
 // ResolveL4EgressPolicy resolves the L4 egress policy for a set of endpoints
@@ -329,7 +496,7 @@ func (p *Repository) ResolveL4EgressPolicy(ctx *SearchContext) (*L4PolicyMap, er
 
 	p.wildcardL3L4Rules(ctx, false, result.Egress)
 
-	state.trace(p, ctx)
+	state.trace(ctx)
 	return &result.Egress, nil
 }
 
@@ -348,7 +515,7 @@ func (p *Repository) ResolveCIDRIngressPolicy(ctx *SearchContext) CIDRPolicyMap 
 		state.ruleID++
 	}
 
-	state.trace(p, ctx)
+	state.trace(ctx)
 	return result.Ingress
 }
 
@@ -367,7 +534,7 @@ func (p *Repository) ResolveCIDREgressPolicy(ctx *SearchContext) CIDRPolicyMap {
 		state.ruleID++
 	}
 
-	state.trace(p, ctx)
+	state.trace(ctx)
 	return result.Egress
 }
 
@@ -386,7 +553,7 @@ func (p *Repository) ResolveCIDRPolicy(ctx *SearchContext) *CIDRPolicy {
 		state.ruleID++
 	}
 
-	state.trace(p, ctx)
+	state.trace(ctx)
 	return result
 }
 
@@ -523,7 +690,7 @@ egressLoop:
 		}
 	}
 
-	egressState.trace(p, egressCtx)
+	egressState.trace(egressCtx)
 
 	return egressDecision
 }
@@ -659,12 +826,14 @@ func (p *Repository) GetJSON() string {
 // rule with labels matching the labels in the provided LabelArray.
 //
 // Must be called with p.Mutex held
-func (p *Repository) GetRulesMatching(labels labels.LabelArray) (ingressMatch bool, egressMatch bool) {
+func (p *Repository) GetRulesMatching(labels labels.LabelArray) (ingressMatch bool, egressMatch bool, matchingRules api.Rules) {
+	matchingRules = make(api.Rules, 0, len(p.rules))
 	ingressMatch = false
 	egressMatch = false
 	for _, r := range p.rules {
 		rulesMatch := r.EndpointSelector.Matches(labels)
 		if rulesMatch {
+			matchingRules = append(matchingRules, &r.Rule)
 			if len(r.Ingress) > 0 {
 				ingressMatch = true
 			}

@@ -109,8 +109,6 @@ func (d dummyOwner) GetNodeSuffix() string {
 	return "foo"
 }
 
-
-
 func (ias *IdentityAllocatorSuite) TestGetIdentityCache(c *C) {
 	InitIdentityAllocator(dummyOwner{})
 	defer IdentityAllocator.DeleteAllKeys()

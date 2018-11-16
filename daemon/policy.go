@@ -83,8 +83,8 @@ func (h *getPolicyResolve) Handle(params GetPolicyResolveParams) middleware.Resp
 		// the API request, that means that policy enforcement is not enabled
 		// for the endpoints corresponding to said sets of labels; thus, we allow
 		// traffic between these sets of labels, and do not enforce policy between them.
-		fromIngress, fromEgress := d.policy.GetRulesMatching(labels.NewSelectLabelArrayFromModel(params.TraceSelector.From.Labels))
-		toIngress, toEgress := d.policy.GetRulesMatching(labels.NewSelectLabelArrayFromModel(params.TraceSelector.To.Labels))
+		fromIngress, fromEgress, _ := d.policy.GetRulesMatching(labels.NewSelectLabelArrayFromModel(params.TraceSelector.From.Labels))
+		toIngress, toEgress, _ := d.policy.GetRulesMatching(labels.NewSelectLabelArrayFromModel(params.TraceSelector.To.Labels))
 		if !fromIngress && !fromEgress && !toIngress && !toEgress {
 			policyEnforcementMsg = "Policy enforcement is disabled because " +
 				"no rules in the policy repository match any endpoint selector " +

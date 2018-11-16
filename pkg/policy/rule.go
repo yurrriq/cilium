@@ -636,3 +636,46 @@ func (r *rule) resolveL4EgressPolicy(ctx *SearchContext, state *traceState, resu
 
 	return nil, nil
 }
+
+func resolveL4EgressPolicy(r api.Rule, ctx *SearchContext, state *traceState, result *L4Policy, requirements []v1.LabelSelectorRequirement) (*L4Policy, error) {
+
+	state.selectRule(ctx, &rule{r})
+	found := 0
+
+	if len(r.Egress) == 0 {
+		ctx.PolicyTrace("    No L4 rules\n")
+	}
+	for _, egressRule := range r.Egress {
+		ruleCopy := egressRule
+		// For each ToEndpoints in each egress rule, add the requirements, which
+		// is a flattened list of all EndpointSelectors from all ToRequires
+		// from rules which select the labels in ctx.From. This ensures that
+		// ToRequires is taken into account even if it isn't part of the current
+		// rule over which we are iterating.
+		if len(requirements) > 0 {
+			// Create a deep copy of the rule, as we are going to modify
+			// ToEndpoints with requirements; we don't want to modify the rule
+			// in the repository.
+			ruleCopy = *egressRule.DeepCopy()
+			for idx := range ruleCopy.ToEndpoints {
+				// Update each EndpointSelector in ToEndpoints to contain
+				// requirements.
+				ruleCopy.ToEndpoints[idx].MatchExpressions = append(ruleCopy.ToEndpoints[idx].MatchExpressions, requirements...)
+				ruleCopy.ToEndpoints[idx].SyncRequirementsWithLabelSelector()
+			}
+		}
+		cnt, err := mergeL4Egress(ctx, ruleCopy, r.Labels.DeepCopy(), result.Egress)
+		if err != nil {
+			return nil, err
+		}
+		if cnt > 0 {
+			found += cnt
+		}
+	}
+
+	if found > 0 {
+		return result, nil
+	}
+
+	return nil, nil
+}

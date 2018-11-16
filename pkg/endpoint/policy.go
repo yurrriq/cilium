@@ -246,6 +246,62 @@ func (e *Endpoint) resolveL4Policy(repo *policy.Repository) (err error) {
 	return
 }
 
+// resolveL4Policy iterates through the policy repository to determine whether
+// any L4 (including L4-dependent L7) policy changes have occurred. If an error
+// occurs during calculation, it will return (false, err). Otherwise, it will
+// determine whether there is a difference between the current realized state
+// and the desired state, and return if there is a difference (true, nil) or
+// not (false, nil).
+//
+// Must be called with global endpoint.Mutex held.
+func (e *Endpoint) resolveL4PolicyWithRules(rules api.Rules) (err error) {
+	var newL4IngressPolicy, newL4EgressPolicy *policy.L4PolicyMap
+
+	ingressCtx := policy.SearchContext{
+		To: e.SecurityIdentity.LabelArray,
+	}
+
+	egressCtx := policy.SearchContext{
+		From: e.SecurityIdentity.LabelArray,
+	}
+
+	if option.Config.TracingEnabled() {
+		ingressCtx.Trace = policy.TRACE_ENABLED
+		egressCtx.Trace = policy.TRACE_ENABLED
+	}
+
+	// ingressPolicy encodes whether any rules select this endpoint at all on
+	// ingress. If no rules select it, no need to iterate over policy repository
+	// to check if policy applies.
+	if !e.ingressPolicyEnabled {
+		newL4IngressPolicy = &policy.L4PolicyMap{}
+	} else {
+		newL4IngressPolicy, err = policy.ResolveL4IngressPolicy(rules, &ingressCtx)
+		if err != nil {
+			return
+		}
+	}
+
+	// egressPolicy encodes whether any rules select this endpoint at all on
+	// egress. If no rules select it, no need to iterate over policy repository
+	// to check if policy applies.
+	if !e.egressPolicyEnabled {
+		newL4EgressPolicy = &policy.L4PolicyMap{}
+	} else {
+		newL4EgressPolicy, err = policy.ResolveL4EgressPolicy(rules, &egressCtx)
+		if err != nil {
+			return
+		}
+	}
+
+	newL4Policy := &policy.L4Policy{Ingress: *newL4IngressPolicy,
+		Egress: *newL4EgressPolicy}
+
+	e.DesiredL4Policy = newL4Policy
+
+	return
+}
+
 func (e *Endpoint) computeDesiredPolicyMapState(repo *policy.Repository) {
 	desiredPolicyKeys := make(PolicyMapState)
 	e.computeDesiredL4PolicyMapEntries(desiredPolicyKeys)
@@ -542,9 +598,11 @@ func (e *Endpoint) regeneratePolicy(owner Owner) error {
 	// policy applies (i.e., if rules select this endpoint). We can use this
 	// information to short-circuit policy generation if enforcement is
 	// disabled for ingress and / or egress.
-	e.ingressPolicyEnabled, e.egressPolicyEnabled = e.ComputePolicyEnforcement(repo)
+	ing, egr, matchingRules := e.ComputePolicyEnforcement(repo)
 
-	err := e.resolveL4Policy(repo)
+	e.ingressPolicyEnabled, e.egressPolicyEnabled = ing, egr
+
+	err := e.resolveL4PolicyWithRules(matchingRules)
 	if err != nil {
 		return err
 	}
@@ -619,27 +677,33 @@ func (e *Endpoint) updateAndOverrideEndpointOptions(opts option.OptionMap) (opts
 // policy enforcement.
 //
 // Must be called with endpoint and repo mutexes held for reading.
-func (e *Endpoint) ComputePolicyEnforcement(repo *policy.Repository) (ingress bool, egress bool) {
+func (e *Endpoint) ComputePolicyEnforcement(repo *policy.Repository) (ingress bool, egress bool, matchingRules api.Rules) {
 	// Check if policy enforcement should be enabled at the daemon level.
 	switch policy.GetPolicyEnabled() {
 	case option.AlwaysEnforce:
+
+		_, _, matchingRules = repo.GetRulesMatching(e.SecurityIdentity.LabelArray)
+
 		// If policy enforcement is enabled for the daemon, then it has to be
 		// enabled for the endpoint.
-		return true, true
+		return true, true, matchingRules
 	case option.DefaultEnforcement:
+
+		ingress, egress, matchingRules = repo.GetRulesMatching(e.SecurityIdentity.LabelArray)
+
 		// If the endpoint has the reserved:init label, i.e. if it has not yet
 		// received any labels, always enforce policy (default deny).
 		if e.IsInit() {
-			return true, true
+			return true, true, matchingRules
 		}
 
 		// Default mode means that if rules contain labels that match this endpoint,
 		// then enable policy enforcement for this endpoint.
-		return repo.GetRulesMatching(e.SecurityIdentity.LabelArray)
+		return ingress, egress, matchingRules
 	default:
 		// If policy enforcement isn't enabled, we do not enable policy
 		// enforcement for the endpoint.
-		return false, false
+		return false, false, matchingRules
 	}
 }
 
