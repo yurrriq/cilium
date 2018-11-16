@@ -373,23 +373,43 @@ func (e *Endpoint) computeDesiredL3PolicyMapEntries(repo *policy.Repository, des
 // Must be called with repo Mutex held for reading, e.Mutex held for writing.
 func (e *Endpoint) regenerateL3Policy(repo *policy.Repository) (bool, error) {
 
-	ctx := policy.SearchContext{
+	ingressCtx := policy.SearchContext{
 		To: e.SecurityIdentity.LabelArray,
 	}
-	if option.Config.TracingEnabled() {
-		ctx.Trace = policy.TRACE_ENABLED
-	}
-	newL3policy := repo.ResolveCIDRPolicy(&ctx)
-	// Perform the validation on the new policy
-	err := newL3policy.Validate()
-	valid := err == nil
 
+	egressCtx := policy.SearchContext{
+		From: e.SecurityIdentity.LabelArray,
+	}
+
+	if option.Config.TracingEnabled() {
+		ingressCtx.Trace = policy.TRACE_ENABLED
+		egressCtx.Trace = policy.TRACE_ENABLED
+	}
+	var cidrIngressPolicyMap, cidrEgressPolicyMap policy.CIDRPolicyMap
+
+	if e.ingressPolicyEnabled {
+		cidrIngressPolicyMap = repo.ResolveCIDRIngressPolicy(&ingressCtx)
+	}
+
+	if e.egressPolicyEnabled {
+		cidrEgressPolicyMap = repo.ResolveCIDREgressPolicy(&ingressCtx)
+	}
+
+	newL3Policy := &policy.CIDRPolicy{
+		Ingress: cidrIngressPolicyMap,
+		Egress:  cidrEgressPolicyMap,
+	}
+
+	// Perform the validation on the new policy
+	err := newL3Policy.Validate()
+
+	valid := (err == nil)
 	if valid {
-		if reflect.DeepEqual(e.L3Policy, newL3policy) {
+		if reflect.DeepEqual(e.L3Policy, newL3Policy) {
 			e.getLogger().Debug("No change in CIDR policy")
 			return false, nil
 		}
-		e.L3Policy = newL3policy
+		e.L3Policy = newL3Policy
 	}
 
 	return valid, err

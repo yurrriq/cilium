@@ -337,6 +337,44 @@ func (p *Repository) ResolveL4EgressPolicy(ctx *SearchContext) (*L4PolicyMap, er
 // the policy repository for `CIDR` rules that are attached to a `Rule`
 // where the EndpointSelector matches `ctx.To`. `ctx.From` takes no effect and
 // is ignored in the search.
+func (p *Repository) ResolveCIDRIngressPolicy(ctx *SearchContext) CIDRPolicyMap {
+	result := NewCIDRPolicy()
+
+	ctx.PolicyTrace("Resolving L3 (CIDR) policy for %+v\n", ctx.To)
+
+	state := traceState{}
+	for _, r := range p.rules {
+		r.resolveCIDRPolicyIngress(ctx, &state, result)
+		state.ruleID++
+	}
+
+	state.trace(p, ctx)
+	return result.Ingress
+}
+
+// ResolveCIDRPolicy resolves the L3 policy for a set of endpoints by searching
+// the policy repository for `CIDR` rules that are attached to a `Rule`
+// where the EndpointSelector matches `ctx.To`. `ctx.From` takes no effect and
+// is ignored in the search.
+func (p *Repository) ResolveCIDREgressPolicy(ctx *SearchContext) CIDRPolicyMap {
+	result := NewCIDRPolicy()
+
+	ctx.PolicyTrace("Resolving L3 (CIDR) policy for %+v\n", ctx.To)
+
+	state := traceState{}
+	for _, r := range p.rules {
+		r.resolveCIDRPolicyEgress(ctx, &state, result)
+		state.ruleID++
+	}
+
+	state.trace(p, ctx)
+	return result.Egress
+}
+
+// ResolveCIDRPolicy resolves the L3 policy for a set of endpoints by searching
+// the policy repository for `CIDR` rules that are attached to a `Rule`
+// where the EndpointSelector matches `ctx.To`. `ctx.From` takes no effect and
+// is ignored in the search.
 func (p *Repository) ResolveCIDRPolicy(ctx *SearchContext) *CIDRPolicy {
 	result := NewCIDRPolicy()
 

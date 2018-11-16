@@ -289,6 +289,77 @@ func mergeCIDR(ctx *SearchContext, dir string, ipRules []api.CIDR, ruleLabels la
 	return found
 }
 
+func (r *rule) resolveCIDRPolicyIngress(ctx *SearchContext, state *traceState, result *CIDRPolicy) *CIDRPolicy {
+	// Don't select rule if it doesn't apply to the given context.
+	if !r.EndpointSelector.Matches(ctx.To) {
+		state.unSelectRule(ctx, ctx.To, r)
+		return nil
+	}
+
+	state.selectRule(ctx, r)
+	found := 0
+
+	for _, ingressRule := range r.Ingress {
+		// TODO (ianvernon): GH-1658
+		var allCIDRs []api.CIDR
+		allCIDRs = append(allCIDRs, ingressRule.FromCIDR...)
+		allCIDRs = append(allCIDRs, api.ComputeResultantCIDRSet(ingressRule.FromCIDRSet)...)
+
+		// CIDR + L4 rules are handled via mergeL4Ingress(),
+		// skip them here.
+		if len(allCIDRs) > 0 && len(ingressRule.ToPorts) > 0 {
+			continue
+		}
+
+		if cnt := mergeCIDR(ctx, "Ingress", allCIDRs, r.Labels, &result.Ingress); cnt > 0 {
+			found += cnt
+		}
+	}
+
+	if found > 0 {
+		return result
+	}
+
+	ctx.PolicyTrace("    No L3 rules\n")
+	return nil
+}
+
+func (r *rule) resolveCIDRPolicyEgress(ctx *SearchContext, state *traceState, result *CIDRPolicy) *CIDRPolicy {
+	// Don't select rule if it doesn't apply to the given context.
+	if !r.EndpointSelector.Matches(ctx.From) {
+		state.unSelectRule(ctx, ctx.From, r)
+		return nil
+	}
+
+	state.selectRule(ctx, r)
+	found := 0
+
+	// CIDR egress policy is used for visibility of desired state in
+	// the API and for determining which prefix lengths are available,
+	// however it does not determine the actual CIDRs in the BPF maps
+	// for allowing traffic by CIDR!
+	for _, egressRule := range r.Egress {
+		var allCIDRs []api.CIDR
+		allCIDRs = append(allCIDRs, egressRule.ToCIDR...)
+		allCIDRs = append(allCIDRs, api.ComputeResultantCIDRSet(egressRule.ToCIDRSet)...)
+
+		// Unlike the Ingress policy which only counts L3 policy in
+		// this function, we count the CIDR+L4 policy in the
+		// desired egress CIDR policy here as well. This ensures
+		// proper computation of IPcache prefix lengths.
+		if cnt := mergeCIDR(ctx, "Egress", allCIDRs, r.Labels, &result.Egress); cnt > 0 {
+			found += cnt
+		}
+	}
+
+	if found > 0 {
+		return result
+	}
+
+	ctx.PolicyTrace("    No L3 rules\n")
+	return nil
+}
+
 // resolveCIDRPolicy inserts the CIDRs from the specified rule into result if
 // the rule corresponds to the current SearchContext. It returns the resultant
 // CIDRPolicy containing the added ingress and egress CIDRs. If no CIDRs are
