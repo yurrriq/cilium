@@ -101,7 +101,7 @@ func (e *EndpointSuite) SetUpSuite(c *C) {
 	policy.SetPolicyEnabled(option.DefaultEnforcement)
 	endpointTestOwner = SetupEndpointTestOwner()
 	ep = endpointCreator(256, identity.NumericIdentity(256))
-	repo.AddList(GenerateNumRules(300))
+	repo.AddList(GenerateNumRules(100000))
 
 }
 
@@ -239,7 +239,7 @@ func endpointCreator(id uint16, secID identity.NumericIdentity) *Endpoint {
 	ep.IPv6 = addressing.DeriveCiliumIPv6(net.IP{0xbe, 0xef, 0xbe, 0xef, 0xbe, 0xef, 0xbe, 0xef, 0xaa, 0xaa, 0xaa, 0xaa, 0x00, 0x00, b[0], b[1]})
 	ep.IfIndex = 1
 	ep.NodeMAC = mac.MAC([]byte{0x02, 0xff, 0xf2, 0x12, 0x0, 0x0})
-	fooLabel := labels.NewLabel("any:foo", "", "")
+	fooLabel := labels.NewLabel("k8s:foo", "", "")
 	fmt.Printf("FOO LABEL: %s\n", fooLabel.String())
 	lbls := labels.Labels{
 		"foo": fooLabel,
@@ -259,7 +259,7 @@ func GenerateNumRules(numRules int) api.Rules {
 		numRules = 300000
 	}*/
 	fmt.Printf("generating %d rules\n", numRules)
-	parseFooLabel := labels.ParseSelectLabel("foo")
+	parseFooLabel := labels.ParseSelectLabel("docker:foo")
 	fmt.Printf("PARSEFOOLABEL: %s\n", parseFooLabel.String())
 	fooSelector := api.NewESFromLabels(parseFooLabel)
 	barSelector := api.NewESFromLabels(labels.ParseSelectLabel("bar"))
