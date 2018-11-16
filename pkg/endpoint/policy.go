@@ -595,7 +595,7 @@ func (e *Endpoint) regeneratePolicy(owner Owner) error {
 		"policyChanged":                  policyChanged,
 		"forcedRegeneration":             forceRegeneration,
 		logfields.PolicyRegenerationTime: totalRegeneration.String(),
-	}).Info("Completed endpoint policy recalculation")
+	}).Debug("Completed endpoint policy recalculation")
 
 	regenerateTimeSec := totalRegeneration.Seconds()
 	metrics.PolicyRegenerationCount.Inc()

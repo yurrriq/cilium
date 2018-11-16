@@ -259,7 +259,7 @@ func GenerateNumRules(numRules int) api.Rules {
 		numRules = 300000
 	}*/
 	fmt.Printf("generating %d rules\n", numRules)
-	parseFooLabel := labels.ParseSelectLabel("docker:foo")
+	parseFooLabel := labels.ParseSelectLabel("k8s:foo")
 	fmt.Printf("PARSEFOOLABEL: %s\n", parseFooLabel.String())
 	fooSelector := api.NewESFromLabels(parseFooLabel)
 	barSelector := api.NewESFromLabels(labels.ParseSelectLabel("bar"))
