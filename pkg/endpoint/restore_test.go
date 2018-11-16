@@ -20,6 +20,7 @@ import (
 	. "gopkg.in/check.v1"
 )
 
+
 func (s *EndpointSuite) TesttransformEndpointForDowngrade(c *C) {
 	/* Cilium 1.2 converted BoolOptions -> IntOptions. */
 	e := NewEndpointWithState(42, StateReady)
