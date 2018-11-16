@@ -638,7 +638,6 @@ func (e *Endpoint) ComputePolicyEnforcement(repo *policy.Repository) (ingress bo
 
 		// Default mode means that if rules contain labels that match this endpoint,
 		// then enable policy enforcement for this endpoint.
-		// GH-1676: Could check e.Consumable instead? Would be much cheaper.
 		return repo.GetRulesMatching(e.SecurityIdentity.LabelArray)
 	default:
 		// If policy enforcement isn't enabled, we do not enable policy
