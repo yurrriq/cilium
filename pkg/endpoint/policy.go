@@ -198,7 +198,7 @@ func (e *Endpoint) computeDesiredL4PolicyMapEntries(keysToAdd PolicyMapState) {
 // not (false, nil).
 //
 // Must be called with global endpoint.Mutex held.
-func (e *Endpoint) resolveL4Policy(repo *policy.Repository) (policyChanged bool, err error) {
+func (e *Endpoint) resolveL4Policy(repo *policy.Repository) (err error) {
 	var newL4IngressPolicy, newL4EgressPolicy *policy.L4PolicyMap
 
 	ingressCtx := policy.SearchContext{
@@ -241,10 +241,7 @@ func (e *Endpoint) resolveL4Policy(repo *policy.Repository) (policyChanged bool,
 	newL4Policy := &policy.L4Policy{Ingress: *newL4IngressPolicy,
 		Egress: *newL4EgressPolicy}
 
-	if !reflect.DeepEqual(e.DesiredL4Policy, newL4Policy) {
-		policyChanged = true
-		e.DesiredL4Policy = newL4Policy
-	}
+	e.DesiredL4Policy = newL4Policy
 
 	return
 }
@@ -371,7 +368,7 @@ func (e *Endpoint) computeDesiredL3PolicyMapEntries(repo *policy.Repository, des
 // regenerateL3Policy calculates the CIDR-based L3 policy for the given endpoint
 // from the set of rules in the repository.
 // Must be called with repo Mutex held for reading, e.Mutex held for writing.
-func (e *Endpoint) regenerateL3Policy(repo *policy.Repository) (bool, error) {
+func (e *Endpoint) regenerateL3Policy(repo *policy.Repository) error {
 
 	ingressCtx := policy.SearchContext{
 		To: e.SecurityIdentity.LabelArray,
@@ -403,16 +400,11 @@ func (e *Endpoint) regenerateL3Policy(repo *policy.Repository) (bool, error) {
 	// Perform the validation on the new policy
 	err := newL3Policy.Validate()
 
-	valid := (err == nil)
-	if valid {
-		if reflect.DeepEqual(e.L3Policy, newL3Policy) {
-			e.getLogger().Debug("No change in CIDR policy")
-			return false, nil
-		}
+	if err == nil {
 		e.L3Policy = newL3Policy
 	}
 
-	return valid, err
+	return err
 }
 
 // Note that this function assumes that endpoint policy has already been generated!
@@ -552,22 +544,14 @@ func (e *Endpoint) regeneratePolicy(owner Owner) error {
 	// disabled for ingress and / or egress.
 	e.ingressPolicyEnabled, e.egressPolicyEnabled = e.ComputePolicyEnforcement(repo)
 
-	l4PolicyChanged, err := e.resolveL4Policy(repo)
+	err := e.resolveL4Policy(repo)
 	if err != nil {
 		return err
 	}
 
-	if l4PolicyChanged {
-		e.getLogger().WithField(logfields.Identity, e.SecurityIdentity.ID).Debug("L4 policy changed")
-	}
-
 	// Calculate L3 (CIDR) policy.
-	var l3PolicyChanged bool
-	if l3PolicyChanged, err = e.regenerateL3Policy(repo); err != nil {
+	if err = e.regenerateL3Policy(repo); err != nil {
 		return err
-	}
-	if l3PolicyChanged {
-		e.getLogger().Debug("regeneration of L3 (CIDR) policy caused policy change")
 	}
 
 	// no failures after this point
@@ -584,15 +568,9 @@ func (e *Endpoint) regeneratePolicy(owner Owner) error {
 	// repository.
 	e.setNextPolicyRevision(revision)
 
-	// If no policy or options change occurred for this endpoint then the endpoint is
-	// already running the latest revision, otherwise we have to wait for
-	// the regeneration of the endpoint to complete.
-	policyChanged := l3PolicyChanged || l4PolicyChanged
-
 	totalRegeneration := time.Since(regenerateStart)
 
 	e.getLogger().WithFields(logrus.Fields{
-		"policyChanged":                  policyChanged,
 		"forcedRegeneration":             forceRegeneration,
 		logfields.PolicyRegenerationTime: totalRegeneration.String(),
 	}).Debug("Completed endpoint policy recalculation")
@@ -601,7 +579,6 @@ func (e *Endpoint) regeneratePolicy(owner Owner) error {
 	metrics.PolicyRegenerationCount.Inc()
 	if regenerateTimeSec < 0 {
 		e.getLogger().WithFields(logrus.Fields{
-			"policyChanged":                  policyChanged,
 			"forcedRegeneration":             forceRegeneration,
 			logfields.PolicyRegenerationTime: totalRegeneration.String(),
 			"regenerateTimeSec":              regenerateTimeSec,
