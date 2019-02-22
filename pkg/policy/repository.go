@@ -446,7 +446,7 @@ func (p *Repository) GetJSON() string {
 // rule with labels matching the labels in the provided LabelArray.
 //
 // Must be called with p.Mutex held
-func (p *Repository) GetRulesMatching(labels labels.LabelArray) (ingressMatch bool, egressMatch bool) {
+func (p *Repository) GetRulesMatching(labels labels.LabelArrayWithHash) (ingressMatch bool, egressMatch bool) {
 	ingressMatch = false
 	egressMatch = false
 	for _, r := range p.rules {
@@ -472,7 +472,7 @@ func (p *Repository) GetRulesMatching(labels labels.LabelArray) (ingressMatch bo
 // a slice of all rules which match.
 //
 // Must be called with p.Mutex held
-func (p *Repository) getMatchingRules(labels labels.LabelArray) (ingressMatch bool, egressMatch bool, matchingRules []*rule) {
+func (p *Repository) getMatchingRules(labels labels.LabelArrayWithHash) (ingressMatch bool, egressMatch bool, matchingRules []*rule) {
 	matchingRules = []*rule{}
 	ingressMatch = false
 	egressMatch = false
@@ -560,7 +560,7 @@ func (p *Repository) GetRulesList() *models.Policy {
 // set of rules in the repository, and the provided set of identities.
 // If the policy cannot be generated due to conflicts at L4 or L7, returns an
 // error.
-func (p *Repository) ResolvePolicy(id uint16, labels labels.LabelArray, policyOwner PolicyOwner, identityCache cache.IdentityCache) (*EndpointPolicy, error) {
+func (p *Repository) ResolvePolicy(id uint16, labels labels.LabelArrayWithHash, policyOwner PolicyOwner, identityCache cache.IdentityCache) (*EndpointPolicy, error) {
 
 	calculatedPolicy := &EndpointPolicy{
 		ID:                      id,
@@ -676,7 +676,7 @@ func (p *Repository) ResolvePolicy(id uint16, labels labels.LabelArray, policyOw
 // the set of labels.
 //
 // Must be called with repo mutex held for reading.
-func (p *Repository) computePolicyEnforcementAndRules(lbls labels.LabelArray) (ingress bool, egress bool, matchingRules ruleSlice) {
+func (p *Repository) computePolicyEnforcementAndRules(lbls labels.LabelArrayWithHash) (ingress bool, egress bool, matchingRules ruleSlice) {
 	// Check if policy enforcement should be enabled at the daemon level.
 	switch GetPolicyEnabled() {
 	case option.AlwaysEnforce:

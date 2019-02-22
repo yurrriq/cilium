@@ -14,6 +14,25 @@
 
 package labels
 
+import (
+	k8sLbls "k8s.io/apimachinery/pkg/labels"
+)
+
+type LabelArrayWithHash struct {
+	LabelArray
+	hash string
+}
+
+type LabelsWithHash interface {
+	k8sLbls.Labels
+
+	Hash() string
+}
+
+func (ls LabelArrayWithHash) Hash() string {
+	return ls.hash
+}
+
 // LabelArray is an array of labels forming a set
 type LabelArray []Label
 
@@ -33,6 +52,26 @@ func ParseSelectLabelArray(labels ...string) LabelArray {
 		array[i] = ParseSelectLabel(labels[i])
 	}
 	return array
+}
+
+// ParseSelectLabelArray parses a list of select labels and returns a LabelArray
+func ParseSelectLabelArrayWithHash(labels ...string) LabelArrayWithHash {
+	array := make([]Label, len(labels))
+	for i := range labels {
+		array[i] = ParseSelectLabel(labels[i])
+	}
+
+	arrayAsLabels := Labels{}
+
+	// TODO ianvernon fix this
+	for _, lbl := range array {
+		arrayAsLabels[lbl.Key] = lbl
+	}
+
+	return LabelArrayWithHash{
+		LabelArray: array,
+		hash:       arrayAsLabels.SHA256Sum(),
+	}
 }
 
 // ParseLabelArrayFromArray converts an array of strings as labels and returns a LabelArray

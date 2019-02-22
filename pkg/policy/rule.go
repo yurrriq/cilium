@@ -162,7 +162,7 @@ func mergeL4Ingress(ctx *SearchContext, rule api.IngressRule, ruleLabels labels.
 	fromEndpoints := rule.GetSourceEndpointSelectors()
 	found := 0
 
-	if ctx.From != nil && len(fromEndpoints) > 0 {
+	if ctx.From.LabelArray != nil && len(fromEndpoints) > 0 {
 		if !fromEndpoints.Matches(ctx.From) {
 			ctx.PolicyTrace("    Labels %s not found", ctx.From)
 			return 0, nil
@@ -232,7 +232,7 @@ func (state *traceState) selectRule(ctx *SearchContext, r *rule) {
 	state.selectedRules++
 }
 
-func (state *traceState) unSelectRule(ctx *SearchContext, labels labels.LabelArray, r *rule) {
+func (state *traceState) unSelectRule(ctx *SearchContext, labels labels.LabelArrayWithHash, r *rule) {
 	ctx.PolicyTraceVerbose("  Rule %s: did not select %+v\n", r, labels)
 }
 

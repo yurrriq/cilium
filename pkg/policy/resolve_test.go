@@ -34,14 +34,14 @@ var (
 	lbls     = labels.Labels{
 		"foo": fooLabel,
 	}
-	lblsArray   = lbls.LabelArray()
-	repo        = &Repository{}
-	fooIdentity = &identity.Identity{
+	lblsArrayWithHash = lbls.LabelArrayWithHash()
+	repo              = &Repository{}
+	fooIdentity       = &identity.Identity{
 		ID:         303,
 		Labels:     lbls,
-		LabelArray: lbls.LabelArray(),
+		LabelArray: lblsArrayWithHash,
 	}
-	identityCache = cache.IdentityCache{303: lblsArray}
+	identityCache = cache.IdentityCache{303: lblsArrayWithHash}
 )
 
 func (ds *PolicyTestSuite) SetUpSuite(c *C) {
@@ -74,7 +74,7 @@ func GenerateNumIdentities(numIdentities int) {
 		bumpedIdentity := i + 1000
 		numericIdentity := identity.NumericIdentity(bumpedIdentity)
 
-		identityCache[numericIdentity] = identityLabels.LabelArray()
+		identityCache[numericIdentity] = identityLabels.LabelArrayWithHash()
 	}
 }
 
@@ -122,7 +122,7 @@ func (d DummyOwner) LookupRedirectPort(l4 *L4Filter) uint16 {
 func (ds *PolicyTestSuite) BenchmarkRegeneratePolicyRules(c *C) {
 	c.ResetTimer()
 	for i := 0; i < c.N; i++ {
-		repo.ResolvePolicy(1, lblsArray, DummyOwner{}, identityCache)
+		repo.ResolvePolicy(1, lblsArrayWithHash, DummyOwner{}, identityCache)
 	}
 }
 
@@ -156,7 +156,7 @@ func (ds *PolicyTestSuite) TestL7WithIngressWildcard(c *C) {
 	defer repo.Mutex.RUnlock()
 
 	identityCache = cache.GetIdentityCache()
-	policy, err := repo.ResolvePolicy(10, labels.ParseSelectLabelArray("id=foo"), DummyOwner{}, identityCache)
+	policy, err := repo.ResolvePolicy(10, labels.ParseSelectLabelArrayWithHash("id=foo"), DummyOwner{}, identityCache)
 	c.Assert(err, IsNil)
 
 	expectedEndpointPolicy := EndpointPolicy{
@@ -232,7 +232,7 @@ func (ds *PolicyTestSuite) TestL7WithLocalHostWildcardd(c *C) {
 	defer repo.Mutex.RUnlock()
 
 	identityCache = cache.GetIdentityCache()
-	policy, err := repo.ResolvePolicy(10, labels.ParseSelectLabelArray("id=foo"), DummyOwner{}, identityCache)
+	policy, err := repo.ResolvePolicy(10, labels.ParseSelectLabelArrayWithHash("id=foo"), DummyOwner{}, identityCache)
 	c.Assert(err, IsNil)
 
 	expectedEndpointPolicy := EndpointPolicy{

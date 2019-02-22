@@ -32,7 +32,7 @@ var (
 )
 
 // IdentityCache is a cache of identity to labels mapping
-type IdentityCache map[identity.NumericIdentity]labels.LabelArray
+type IdentityCache map[identity.NumericIdentity]labels.LabelArrayWithHash
 
 // IdentitiesModel is a wrapper so that we can implement the sort.Interface
 // to sort the slice by ID
@@ -53,7 +53,7 @@ func GetIdentityCache() IdentityCache {
 		IdentityAllocator.ForeachCache(func(id idpool.ID, val allocator.AllocatorKey) {
 			if val != nil {
 				if gi, ok := val.(globalIdentity); ok {
-					cache[identity.NumericIdentity(id)] = gi.LabelArray()
+					cache[identity.NumericIdentity(id)] = gi.LabelArrayWithHash()
 				} else {
 					log.Warningf("Ignoring unknown identity type '%s': %+v",
 						reflect.TypeOf(val), val)
@@ -63,12 +63,12 @@ func GetIdentityCache() IdentityCache {
 	}
 
 	for key, identity := range identity.ReservedIdentityCache {
-		cache[key] = identity.Labels.LabelArray()
+		cache[key] = identity.Labels.LabelArrayWithHash()
 	}
 
 	if localIdentities != nil {
 		for _, identity := range localIdentities.GetIdentities() {
-			cache[identity.ID] = identity.Labels.LabelArray()
+			cache[identity.ID] = identity.Labels.LabelArrayWithHash()
 		}
 	}
 
