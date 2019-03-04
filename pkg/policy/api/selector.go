@@ -24,12 +24,24 @@ import (
 	"github.com/cilium/cilium/pkg/logging"
 	"github.com/cilium/cilium/pkg/logging/logfields"
 	"github.com/cilium/cilium/pkg/metrics"
+	"github.com/hashicorp/golang-lru"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/validation"
 	k8sLbls "k8s.io/apimachinery/pkg/labels"
 )
 
-var log = logging.DefaultLogger.WithField(logfields.LogSubsys, "policy-api")
+var (
+	log           = logging.DefaultLogger.WithField(logfields.LogSubsys, "policy-api")
+	selectorCache *lru.Cache
+)
+
+func init() {
+	var err error
+	selectorCache, err = lru.New(512)
+	if err != nil {
+		log.WithError(err).Error("could not create EndpointSelector cache")
+	}
+}
 
 // EndpointSelector is a wrapper for k8s LabelSelector.
 type EndpointSelector struct {
@@ -54,7 +66,7 @@ func (n *EndpointSelector) LabelSelectorString() string {
 // String returns a string representation of EndpointSelector.
 func (n EndpointSelector) String() string {
 	j, _ := n.MarshalJSON()
-	return string(j)
+	return fmt.Sprintf("%s, hash: %s", string(j), n.hash)
 }
 
 // UnmarshalJSON unmarshals the endpoint selector from the byte array.
@@ -200,6 +212,7 @@ func NewESFromMatchRequirements(matchLabels map[string]string, reqs []metav1.Lab
 	return EndpointSelector{
 		LabelSelector: labelSelector,
 		requirements:  labelSelectorToRequirements(labelSelector),
+		hash:          fmt.Sprintf("%x", sha512.Sum512_256(([]byte)(labelSelector.String()))),
 	}
 }
 
@@ -278,6 +291,27 @@ func (n *EndpointSelector) AddMatch(key, value string) {
 // "all".
 func (n *EndpointSelector) Matches(lblsToMatch labels.LabelsWithHash) bool {
 
+	var lookupSHA string
+
+	//log.Infof("Matches: endpointSelector hash --> %s", n.hash)
+	//log.Infof("Matches: lblsToMatch hash --> %s", lblsToMatch.Hash())
+
+	// Check the cache of EndpointSelector hashes.
+	if n.hash != "" && lblsToMatch.Hash() != "" {
+		lookupSHA = n.hash + ":" + lblsToMatch.Hash()
+		if result, ok := selectorCache.Get(lookupSHA); ok {
+			boolResult, ok := result.(bool)
+			if !ok {
+				log.Fatal("improper storing of value in cache")
+			}
+			//log.Infof("cache lookup succeeded - %v matches %v ? %v", n, lblsToMatch, boolResult)
+			return boolResult
+		}
+		// Otherwise fallback to selector-based matching
+	}
+
+	//log.Warning("didnt get cached hash")
+
 	// Try to update cached requirements for this EndpointSelector if possible.
 	if n.requirements == nil {
 		n.requirements = labelSelectorToRequirements(n.LabelSelector)
@@ -297,8 +331,14 @@ func (n *EndpointSelector) Matches(lblsToMatch labels.LabelsWithHash) bool {
 
 	for _, req := range *n.requirements {
 		if !req.Matches(lblsToMatch) {
+			if lookupSHA != "" {
+				selectorCache.Add(lookupSHA, false)
+			}
 			return false
 		}
+	}
+	if lookupSHA != "" {
+		selectorCache.Add(lookupSHA, true)
 	}
 	return true
 }
