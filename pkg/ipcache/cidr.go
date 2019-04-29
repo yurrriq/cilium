@@ -29,12 +29,40 @@ import (
 // allocation fails, all allocations are rolled back and the error is returned.
 // When an identity is freshly allocated for a CIDR, it is added to the
 // ipcache.
-func AllocateCIDRs(impl Implementation, prefixes []*net.IPNet) error {
+func AllocateCIDRs(impl Implementation, prefixes []*net.IPNet) ([]*identity.Identity, error) {
 	// First, if the implementation will complain, exit early.
 	if err := checkPrefixes(impl, prefixes); err != nil {
-		return err
+		return nil, err
 	}
 
+	return allocateCIDRs(prefixes)
+}
+
+// AllocateCIDRsForIPs attempts to allocate identities for a list of CIDRs. It
+// fails if any of the CIDRs do not correspond to /32 or /128 IP addresses. If
+// any allocation fails, all allocations are rolled back and the error is
+// returned. When an identity is freshly allocated for a CIDR, it is added to
+// the ipcache.
+func AllocateCIDRsForIPs(prefixes []*net.IPNet) ([]*identity.Identity, error) {
+	// Ensure that we are for sure only dealing with exact IPs (/32 and /128).
+	for _, prefix := range prefixes {
+		// IPv6
+		if prefix.IP.To4() == nil {
+			if ones, bits := prefix.Mask.Size(); ones != net.IPv6len*8 && bits != net.IPv6len*8 {
+				return nil, fmt.Errorf("IPNet for IPv6 address did not have /128 mask")
+			}
+		} else {
+			// IPv4
+			if ones, bits := prefix.Mask.Size(); ones != net.IPv4len*8 && bits != net.IPv4len*8 {
+				return nil, fmt.Errorf("IPNet for IPv6 address did not have /128 mask")
+			}
+		}
+	}
+
+	return allocateCIDRs(prefixes)
+}
+
+func allocateCIDRs(prefixes []*net.IPNet) ([]*identity.Identity, error) {
 	// maintain list of used identities to undo on error
 	usedIdentities := []*identity.Identity{}
 
@@ -49,7 +77,7 @@ func AllocateCIDRs(impl Implementation, prefixes []*net.IPNet) error {
 		id, isNew, err := cache.AllocateIdentity(context.Background(), cidr.GetCIDRLabels(prefix))
 		if err != nil {
 			cache.ReleaseSlice(context.Background(), usedIdentities)
-			return fmt.Errorf("failed to allocate identity for cidr %s: %s", prefix.String(), err)
+			return nil, fmt.Errorf("failed to allocate identity for cidr %s: %s", prefix.String(), err)
 		}
 
 		id.CIDRLabel = labels.NewLabelsFromModel([]string{labels.LabelSourceCIDR + ":" + prefix.String()})
@@ -60,14 +88,17 @@ func AllocateCIDRs(impl Implementation, prefixes []*net.IPNet) error {
 		}
 	}
 
+	allocatedIdentitiesSlice := make([]*identity.Identity, 0, len(allocatedIdentities))
+
 	for prefixString, id := range allocatedIdentities {
 		IPIdentityCache.Upsert(prefixString, nil, 0, Identity{
 			ID:     id.ID,
 			Source: FromCIDR,
 		})
+		allocatedIdentitiesSlice = append(allocatedIdentitiesSlice, id)
 	}
 
-	return nil
+	return allocatedIdentitiesSlice, nil
 }
 
 // ReleaseCIDRs releases the identities of a list of CIDRs. When the last use
