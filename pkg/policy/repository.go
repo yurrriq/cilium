@@ -310,19 +310,6 @@ func (p *Repository) AddListLocked(rules api.Rules) (ruleSlice, uint64) {
 			Rule:     *rules[i],
 			metadata: newRuleMetadata(),
 		}
-		for _, ingressRule := range rules[i].Ingress {
-			for _, sel := range ingressRule.GetSourceEndpointSelectors() {
-				AddIdentitySelectorOwner(sel)
-			}
-		}
-		for _, egressRule := range rules[i].Egress {
-			for _, sel := range egressRule.GetDestinationEndpointSelectors() {
-				AddIdentitySelectorOwner(sel)
-			}
-			for _, fqdnSel := range egressRule.ToFQDNs {
-				AddFQDNSelectorOwner(fqdnSel)
-			}
-		}
 		newList[i] = newRule
 	}
 
@@ -422,23 +409,6 @@ func (p *Repository) DeleteByLabelsLocked(labels labels.LabelArray) (ruleSlice, 
 			new = append(new, r)
 		} else {
 			deletedRules = append(deletedRules, r)
-			// Go through all selectors in rules and remove from SelectorCache!
-			for _, rr := range deletedRules {
-				for _, ingressRule := range rr.Ingress {
-					for _, sel := range ingressRule.GetSourceEndpointSelectors() {
-						RemoveIdentitySelectorOwner(sel)
-					}
-				}
-				for _, egressRule := range rr.Egress {
-					for _, sel := range egressRule.GetDestinationEndpointSelectors() {
-						RemoveIdentitySelectorOwner(sel)
-					}
-					for _, fqdnSel := range egressRule.ToFQDNs {
-						RemoveFQDNSelectorOwner(fqdnSel)
-					}
-				}
-			}
-
 			deleted++
 		}
 	}
@@ -450,6 +420,34 @@ func (p *Repository) DeleteByLabelsLocked(labels labels.LabelArray) (ruleSlice, 
 	}
 
 	return deletedRules, p.GetRevision(), deleted
+}
+
+// GetAllSelectors returns all of the EndpointSelectors and FQDNSelectors from
+// the given slice of rules.
+func (r ruleSlice) GetAllSelectors() ([]api.EndpointSelector, []api.FQDNSelector) {
+	epSels := make([]api.EndpointSelector, 0)
+	fqdnSels := make([]api.FQDNSelector, 0)
+	for _, rr := range r {
+		rEpSels, rFqdnSels := rr.GetAllSelectors()
+		epSels = append(epSels, rEpSels...)
+		fqdnSels = append(fqdnSels, rFqdnSels...)
+	}
+	return epSels, fqdnSels
+}
+
+// GetAllSelectors returns all of the EndpointSelectors and FQDNSelectors from
+// the given rule.
+func (r *rule) GetAllSelectors() ([]api.EndpointSelector, []api.FQDNSelector) {
+	epSels := make([]api.EndpointSelector, 0)
+	fqdnSels := make([]api.FQDNSelector, 0)
+	for _, ingressRule := range r.Ingress {
+		epSels = append(epSels, ingressRule.GetSourceEndpointSelectors()...)
+	}
+	for _, egressRule := range r.Egress {
+		epSels = append(epSels, egressRule.GetDestinationEndpointSelectors()...)
+		fqdnSels = append(fqdnSels, egressRule.ToFQDNs...)
+	}
+	return epSels, fqdnSels
 }
 
 // DeleteByLabels deletes all rules in the policy repository which contain the
