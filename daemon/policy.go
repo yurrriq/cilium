@@ -31,6 +31,7 @@ import (
 	"github.com/cilium/cilium/pkg/endpoint"
 	"github.com/cilium/cilium/pkg/endpointmanager"
 	"github.com/cilium/cilium/pkg/eventqueue"
+	"github.com/cilium/cilium/pkg/fqdn"
 	"github.com/cilium/cilium/pkg/identity/cache"
 	"github.com/cilium/cilium/pkg/ipcache"
 	"github.com/cilium/cilium/pkg/labels"
@@ -339,6 +340,11 @@ func (d *Daemon) policyAdd(sourceRules policyAPI.Rules, opts *AddOptions, resCha
 
 	endpointsToRegen := policy.NewIDSet()
 
+	// These must be slices as we want to account for multiple of the same
+	// selector for refcounting in SelectorCache.
+	deletedFqdnSels := make([]policyAPI.FQDNSelector, 0)
+	deletedEpSels := make([]policyAPI.EndpointSelector, 0)
+
 	if opts != nil {
 		if opts.Replace {
 			for _, r := range rules {
@@ -348,7 +354,9 @@ func (d *Daemon) policyAdd(sourceRules policyAPI.Rules, opts *AddOptions, resCha
 					d.dnsRuleGen.StopManageDNSName(oldRules)
 					deletedRules, _, _ := d.policy.DeleteByLabelsLocked(r.Labels)
 					deletedRules.UpdateRulesEndpointsCaches(endpointsToBumpRevision, endpointsToRegen, &policySelectionWG)
-
+					delEpSels, delFqdnSels := deletedRules.GetAllSelectors()
+					deletedEpSels = append(deletedEpSels, delEpSels...)
+					deletedFqdnSels = append(deletedFqdnSels, delFqdnSels...)
 				}
 			}
 		}
@@ -356,9 +364,13 @@ func (d *Daemon) policyAdd(sourceRules policyAPI.Rules, opts *AddOptions, resCha
 			oldRules := d.policy.SearchRLocked(opts.ReplaceWithLabels)
 			removedPrefixes = append(removedPrefixes, policy.GetCIDRPrefixes(oldRules)...)
 			if len(oldRules) > 0 {
+				// TODO Ian remove this ?
 				d.dnsRuleGen.StopManageDNSName(oldRules)
 				deletedRules, _, _ := d.policy.DeleteByLabelsLocked(opts.ReplaceWithLabels)
 				deletedRules.UpdateRulesEndpointsCaches(endpointsToBumpRevision, endpointsToRegen, &policySelectionWG)
+				delEpSels, delFqdnSels := deletedRules.GetAllSelectors()
+				deletedEpSels = append(deletedEpSels, delEpSels...)
+				deletedFqdnSels = append(deletedFqdnSels, delFqdnSels...)
 			}
 		}
 	}
@@ -371,6 +383,38 @@ func (d *Daemon) policyAdd(sourceRules policyAPI.Rules, opts *AddOptions, resCha
 		newRev: newRev,
 		err:    nil,
 	}
+
+	// Now that we have accrued all selectors, we can propagate the delta between
+	// selectors to the SelectorCache and the fqdn subsystems.
+	addedEpSels, addedFqdnSels := addedRules.GetAllSelectors()
+
+	selCacheUpdate := &policy.SelectorUpdate{
+		AddedEpSels:     addedEpSels,
+		DeletedEpSels:   deletedEpSels,
+		AddedFQDNSels:   addedFqdnSels,
+		DeletedFQDNSels: deletedFqdnSels,
+	}
+
+	// SelectorCache should be updated before FQDN subsystem so that we can be
+	// sure that FQDN updates will get propagated to the SelectorCache!
+	_, removedFQDNSels := policy.UpdateSelectorCache(selCacheUpdate)
+
+
+	// Use which FQDNSelectors which were removed from SelectorCache to remove
+	// updates for from the FQDN subsystem.
+
+	// Convert added list to a map now.
+	fqdnSelAddedMap := make(map[policyAPI.FQDNSelector]struct{}, len(addedFqdnSels))
+
+	for _, addedFqdnSel := range addedFqdnSels {
+		fqdnSelAddedMap[addedFqdnSel] = struct{}{}
+	}
+
+	fqdnSelUpdate := &fqdn.SelectorUpdate{
+		Added:   fqdnSelAddedMap,
+		Deleted: removedFQDNSels,
+	}
+	d.dnsRuleGen.UpdateSelectorManagement(fqdnSelUpdate)
 
 	// The rules are added, we can begin ToFQDN DNS polling for them
 	// Note: api.FQDNSelector.sanitize checks that the matchName entries are
