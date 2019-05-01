@@ -310,6 +310,19 @@ func (p *Repository) AddListLocked(rules api.Rules) (ruleSlice, uint64) {
 			Rule:     *rules[i],
 			metadata: newRuleMetadata(),
 		}
+		for _, ingressRule := range rules[i].Ingress {
+			for _, sel := range ingressRule.GetSourceEndpointSelectors() {
+				AddIdentitySelectorOwner(sel)
+			}
+		}
+		for _, egressRule := range rules[i].Egress {
+			for _, sel := range egressRule.GetDestinationEndpointSelectors() {
+				AddIdentitySelectorOwner(sel)
+			}
+			for _, fqdnSel := range egressRule.ToFQDNs {
+				AddFQDNSelectorOwner(fqdnSel)
+			}
+		}
 		newList[i] = newRule
 	}
 
@@ -409,6 +422,23 @@ func (p *Repository) DeleteByLabelsLocked(labels labels.LabelArray) (ruleSlice, 
 			new = append(new, r)
 		} else {
 			deletedRules = append(deletedRules, r)
+			// Go through all selectors in rules and remove from SelectorCache!
+			for _, rr := range deletedRules {
+				for _, ingressRule := range rr.Ingress {
+					for _, sel := range ingressRule.GetSourceEndpointSelectors() {
+						RemoveIdentitySelectorOwner(sel)
+					}
+				}
+				for _, egressRule := range rr.Egress {
+					for _, sel := range egressRule.GetDestinationEndpointSelectors() {
+						RemoveIdentitySelectorOwner(sel)
+					}
+					for _, fqdnSel := range egressRule.ToFQDNs {
+						RemoveFQDNSelectorOwner(fqdnSel)
+					}
+				}
+			}
+
 			deleted++
 		}
 	}
