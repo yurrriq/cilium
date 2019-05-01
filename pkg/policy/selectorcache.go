@@ -610,3 +610,49 @@ func RemoveFQDNSelectorOwner(selector api.FQDNSelector) {
 	selectorCache.RemoveFQDNSelectorOwner(selector)
 
 }
+
+// SelectorUpdate contains lists of added and deleted api.EndpointSelectors and
+// api.FQDNSelectors. All lists may contain duplicates!
+type SelectorUpdate struct {
+	// AddedEpSels is the list of api.EndpointSelector that is added by rules.
+	AddedEpSels []api.EndpointSelector
+	// DeletedpSels is the list of api.EndpointSelector that is deleted by
+	// rules.
+	DeletedEpSels []api.EndpointSelector
+	// AddedFQDNSels is the list of api.FQDNSelector that is added by rules.
+	AddedFQDNSels []api.FQDNSelector
+	// DeletedFQDNSels is the list of api.FQDNSelector that is deleted by rules.
+	DeletedFQDNSels []api.FQDNSelector
+}
+
+// UpdateSelectorCache inserts and then removes all of the selectors in update
+// into the global SelectorCache.
+func UpdateSelectorCache(update *SelectorUpdate) {
+	selectorCache.Update(update)
+}
+
+// Update inserts and then removes all of the selectors in update into the
+// SelectorCache.
+func (sc *SelectorCache) Update(update *SelectorUpdate) {
+	sc.mutex.Lock()
+	defer sc.mutex.Unlock()
+
+	// Add first, then delete - this way we don't unnecessary clear the cache
+	// if state has already been computed!
+
+	for _, addedEpSel := range update.AddedEpSels {
+		sc.AddIdentitySelectorOwner(addedEpSel)
+	}
+
+	for _, deletedEpSel := range update.DeletedEpSels {
+		sc.RemoveIdentitySelectorOwner(deletedEpSel)
+	}
+
+	for _, addedFqdnSel := range update.AddedFQDNSels {
+		sc.AddFQDNSelectorOwner(addedFqdnSel)
+	}
+
+	for _, deletedFqdnSel := range update.DeletedFQDNSels {
+		sc.RemoveFQDNSelectorOwner(deletedFqdnSel)
+	}
+}
