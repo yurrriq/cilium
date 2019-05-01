@@ -560,7 +560,7 @@ func (sc *SelectorCache) AddFQDNSelectorOwner(selector api.FQDNSelector) {
 	sel.addOwner()
 }
 
-func (sc *SelectorCache) RemoveIdentitySelectorOwner(selector api.EndpointSelector) {
+func (sc *SelectorCache) RemoveIdentitySelectorOwner(selector api.EndpointSelector) bool {
 	sc.mutex.Lock()
 	defer sc.mutex.Unlock()
 
@@ -573,11 +573,13 @@ func (sc *SelectorCache) RemoveIdentitySelectorOwner(selector api.EndpointSelect
 		// SelectorCache.
 		if sel.removeOwner() {
 			delete(sc.selectors, key)
+			return true
 		}
 	}
+	return false
 }
 
-func (sc *SelectorCache) RemoveFQDNSelectorOwner(selector api.FQDNSelector) {
+func (sc *SelectorCache) RemoveFQDNSelectorOwner(selector api.FQDNSelector) bool {
 	sc.mutex.Lock()
 	defer sc.mutex.Unlock()
 
@@ -590,8 +592,10 @@ func (sc *SelectorCache) RemoveFQDNSelectorOwner(selector api.FQDNSelector) {
 		// SelectorCache now.
 		if sel.removeOwner() {
 			delete(sc.selectors, key)
+			return true
 		}
 	}
+	return false
 }
 
 func AddIdentitySelectorOwner(selector api.EndpointSelector) {
@@ -602,12 +606,12 @@ func AddFQDNSelectorOwner(selector api.FQDNSelector) {
 	selectorCache.AddFQDNSelectorOwner(selector)
 }
 
-func RemoveIdentitySelectorOwner(selector api.EndpointSelector) {
-	selectorCache.RemoveIdentitySelectorOwner(selector)
+func RemoveIdentitySelectorOwner(selector api.EndpointSelector) bool {
+	return selectorCache.RemoveIdentitySelectorOwner(selector)
 }
 
-func RemoveFQDNSelectorOwner(selector api.FQDNSelector) {
-	selectorCache.RemoveFQDNSelectorOwner(selector)
+func RemoveFQDNSelectorOwner(selector api.FQDNSelector) bool {
+	return selectorCache.RemoveFQDNSelectorOwner(selector)
 
 }
 
@@ -627,15 +631,19 @@ type SelectorUpdate struct {
 
 // UpdateSelectorCache inserts and then removes all of the selectors in update
 // into the global SelectorCache.
-func UpdateSelectorCache(update *SelectorUpdate) {
-	selectorCache.Update(update)
+func UpdateSelectorCache(update *SelectorUpdate) (map[api.EndpointSelector]struct{}, map[api.FQDNSelector]struct{}) {
+	return selectorCache.Update(update)
 }
 
 // Update inserts and then removes all of the selectors in update into the
-// SelectorCache.
-func (sc *SelectorCache) Update(update *SelectorUpdate) {
+// SelectorCache. Returns the set of EndpointSelector and FQDNSelector which
+// were deleted (e.g., had a refCount of zero after deletion was performed).
+func (sc *SelectorCache) Update(update *SelectorUpdate) (map[api.EndpointSelector]struct{}, map[api.FQDNSelector]struct{}) {
 	sc.mutex.Lock()
 	defer sc.mutex.Unlock()
+
+	deletedEpSels := make(map[api.EndpointSelector]struct{})
+	deletedFQDNSels := make(map[api.FQDNSelector]struct{})
 
 	// Add first, then delete - this way we don't unnecessary clear the cache
 	// if state has already been computed!
@@ -645,7 +653,9 @@ func (sc *SelectorCache) Update(update *SelectorUpdate) {
 	}
 
 	for _, deletedEpSel := range update.DeletedEpSels {
-		sc.RemoveIdentitySelectorOwner(deletedEpSel)
+		if sc.RemoveIdentitySelectorOwner(deletedEpSel) {
+			deletedEpSels[deletedEpSel] = struct{}{}
+		}
 	}
 
 	for _, addedFqdnSel := range update.AddedFQDNSels {
@@ -653,6 +663,10 @@ func (sc *SelectorCache) Update(update *SelectorUpdate) {
 	}
 
 	for _, deletedFqdnSel := range update.DeletedFQDNSels {
-		sc.RemoveFQDNSelectorOwner(deletedFqdnSel)
+		if sc.RemoveFQDNSelectorOwner(deletedFqdnSel) {
+			deletedFQDNSels[deletedFqdnSel] = struct{}{}
+		}
 	}
+
+	return deletedEpSels, deletedFQDNSels
 }
