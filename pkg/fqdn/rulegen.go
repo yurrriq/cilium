@@ -77,6 +77,10 @@ type RuleGen struct {
 	// UUID to the rule copy.
 	allRules map[string]*api.Rule
 
+	// allSelectors contains all FQDNSelectors which are present in policy. We
+	// use these selectors to map selectors --> IPs.
+	allSelectors map[api.FQDNSelector]struct{}
+
 	// cache is a private copy of the pointer from config.
 	cache *DNSCache
 }
@@ -100,6 +104,7 @@ func NewRuleGen(config Config) *RuleGen {
 		namesToPoll: make(map[string]struct{}),
 		sourceRules: regexpmap.NewRegexpMap(),
 		allRules:    make(map[string]*api.Rule),
+		allSelectors: make(map[api.FQDNSelector]struct{}),
 		cache:       config.Cache,
 	}
 
@@ -184,6 +189,26 @@ perRule:
 	return result, selectorIPMapping
 }
 
+
+type SelectorUpdate struct {
+	Added map[api.FQDNSelector]struct{}
+	Deleted map[api.FQDNSelector]struct{}
+}
+
+func (gen *RuleGen) UpdateSelectorManagement(selUpdate *SelectorUpdate) {
+	gen.Lock()
+	defer gen.Unlock()
+
+	_, _, err := gen.updateDNSResources(selUpdate)
+	if err != nil {
+		return err
+	}
+
+	return nil
+
+
+
+}
 // StartManageDNSName begins managing sourceRules that contain toFQDNs
 // sections. When the DNS data of the included matchNames changes, RuleGen will
 // emit a replacement rule that contains the IPs for each matchName.
@@ -228,6 +253,11 @@ perRule:
 				"numRules":              len(sourceRules),
 			}).Debug("Added FQDN to managed list")
 		}
+	}
+	// newDNSNames, alreadyExistsDNSNames, err :=
+	_, _, err := gen.updateDNSResources(fqdnSels)
+	if err != nil {
+		return err
 	}
 
 	return nil
@@ -431,6 +461,95 @@ func (gen *RuleGen) GenerateRulesFromSources(sourceRules []*api.Rule) (generated
 	}
 
 	return generatedRules, namesMissingIPs, selectorIPMapping
+}
+
+
+func (gen *RuleGen) updateDNSResources(selUpdate *SelectorUpdate) (newDNSNames, oldDNSNames []string, err error) {
+	// We need to "expand" the selectors to their string representation
+	// (MatchName and MatchPattern).
+	namesToStopManaging := make(map[string]struct{})
+
+
+	for deletedFQDN := range selUpdate.Deleted {
+		// DeletedFQDN should always exist here, so if it doesn't exist,
+		// possibly emit a warning??
+		if _, exists := gen.allSelectors[deletedFQDN]; exists {
+			if len(deletedFQDN.MatchName) > 0 {
+				dnsName := prepareMatchName(deletedFQDN.MatchName)
+				dnsNameAsRE := matchpattern.ToRegexp(dnsName)
+				namesToStopManaging[dnsNameAsRE] = struct{}{}
+			}
+			if len(deletedFQDN.MatchPattern) > 0 {
+				dnsPattern := matchpattern.Sanitize(deletedFQDN.MatchPattern)
+				dnsPatternAsRE := matchpattern.ToRegexp(dnsPattern)
+				namesToStopManaging[dnsPatternAsRE] = struct{}{}
+			}
+		} else {
+			log.WithField("fqdnSelector", deletedFQDN).
+				Warning("FQDNSelector was deleted from policy " +
+					"repository, but FQDN subsystem was not aware that it " +
+					"existed")
+		}
+	}
+
+	/*for addedFQDN := range selUpdate.Added {
+		gen.allSelectors[addedFQDN] = struct{}{}
+	}*/
+
+
+
+	// Add a dnsname -> rule reference. We track old/new names by the literal
+	// value in matchName/Pattern. They are inserted into the sourceRules
+	// RegexpMap as regexeps, however, so we can match against them later.
+	for addedFQDN := range selUpdate.Added {
+		// Update cache of selectors which gen is tracking.
+		gen.allSelectors[addedFQDN] = struct{}{}
+
+		REsToAddForSelector := map[string]string{}
+
+		if len(addedFQDN.MatchName) > 0 {
+			dnsName := prepareMatchName(addedFQDN.MatchName)
+			dnsNameAsRE := matchpattern.ToRegexp(dnsName)
+			REsToAddForSelector[addedFQDN.MatchName] = dnsNameAsRE
+			gen.namesToPoll[dnsName] = struct{}{}
+		}
+
+		if len(addedFQDN.MatchPattern) > 0 {
+			dnsPattern := matchpattern.Sanitize(addedFQDN.MatchPattern)
+			dnsPatternAsRE := matchpattern.ToRegexp(dnsPattern)
+			REsToAddForSelector[addedFQDN.MatchPattern] = dnsPatternAsRE
+		}
+
+		for policyMatchStr, dnsPatternAsRE := range REsToAddForSelector {
+			delete(namesToStopManaging, dnsPatternAsRE) // keep managing this matchName/Pattern
+			// check if this is already managed or not
+			if exists := gen.sourceRules.LookupContainsValue(dnsPatternAsRE, uuid); exists {
+				oldDNSNames = append(oldDNSNames, policyMatchStr)
+			} else {
+				// This ToFQDNs.MatchName/Pattern has not been seen before
+				newDNSNames = append(newDNSNames, policyMatchStr)
+				// Add this egress rule as a dependent on ToFQDNs.MatchPattern, but fixup the literal
+				// name so it can work as a regex
+				if err = gen.sourceRules.Add(dnsPatternAsRE, uuid); err != nil {
+					return nil, nil, err
+				}
+			}
+		}
+	}
+
+	// Stop managing names/patterns that remain in shouldStopManaging (i.e. not
+	// seen when iterating .ToFQDNs rules above). The net result is to remove
+	// dnsName -> uuid associations that existed in the older version of the rule
+	// with this UUID, but did not re-occur in the new instance.
+	// When a dnsName has no uuid associations, we remove it from the poll list
+	// outright.
+	for dnsName := range selectorsToStopManaging {
+		if shouldStopManaging := gen.removeFromDNSName(dnsName, uuid); shouldStopManaging {
+			delete(gen.namesToPoll, dnsName) // A no-op for matchPattern
+		}
+	}
+
+	return newDNSNames, oldDNSNames, nil
 }
 
 // addRule places an api.Rule in the source list for a DNS name.
