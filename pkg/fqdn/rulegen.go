@@ -397,9 +397,15 @@ perDNSName:
 
 		// accumulate the new selectors affected by new IPs
 		for fqdnSel := range gen.allSelectors {
-			if fqdnSel.Matches(dnsName) {
+			matches := (&fqdnSel).Matches(dnsName)
+			if matches {
 				affectedSelectors[fqdnSel] = struct{}{}
 			}
+			log.WithFields(logrus.Fields{
+				"matches": matches,
+				"fqdnSel": fqdnSel,
+				"dnsName": dnsName,
+			}).Info("UpdateDNSIPs: fqdnSel matches returned")
 		}
 	}
 

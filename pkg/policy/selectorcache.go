@@ -515,9 +515,6 @@ func UpdateIdentities(added, deleted cache.IdentityCache) {
 }
 
 func (sc *SelectorCache) AddIdentitySelectorOwner(selector api.EndpointSelector) {
-	sc.mutex.Lock()
-	defer sc.mutex.Unlock()
-
 	key := selector.String()
 	sel, added := sc.selectors[key]
 
@@ -538,9 +535,6 @@ func (sc *SelectorCache) AddIdentitySelectorOwner(selector api.EndpointSelector)
 }
 
 func (sc *SelectorCache) AddFQDNSelectorOwner(selector api.FQDNSelector) {
-	sc.mutex.Lock()
-	defer sc.mutex.Unlock()
-
 	key := selector.String()
 	sel, added := sc.selectors[key]
 
@@ -561,8 +555,6 @@ func (sc *SelectorCache) AddFQDNSelectorOwner(selector api.FQDNSelector) {
 }
 
 func (sc *SelectorCache) RemoveIdentitySelectorOwner(selector api.EndpointSelector) bool {
-	sc.mutex.Lock()
-	defer sc.mutex.Unlock()
 
 	key := selector.String()
 	sel, added := sc.selectors[key]
@@ -580,9 +572,6 @@ func (sc *SelectorCache) RemoveIdentitySelectorOwner(selector api.EndpointSelect
 }
 
 func (sc *SelectorCache) RemoveFQDNSelectorOwner(selector api.FQDNSelector) bool {
-	sc.mutex.Lock()
-	defer sc.mutex.Unlock()
-
 	key := selector.String()
 	sel, added := sc.selectors[key]
 

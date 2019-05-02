@@ -397,6 +397,7 @@ func (d *Daemon) policyAdd(sourceRules policyAPI.Rules, opts *AddOptions, resCha
 
 	// SelectorCache should be updated before FQDN subsystem so that we can be
 	// sure that FQDN updates will get propagated to the SelectorCache!
+	log.Info("policyAdd: daemon updating selectorCache")
 	_, removedFQDNSels := policy.UpdateSelectorCache(selCacheUpdate)
 
 	// Use which FQDNSelectors which were removed from SelectorCache to remove
@@ -413,9 +414,13 @@ func (d *Daemon) policyAdd(sourceRules policyAPI.Rules, opts *AddOptions, resCha
 		Added:   fqdnSelAddedMap,
 		Deleted: removedFQDNSels,
 	}
+
+	log.Info("policyAdd: daemon updating rulegen selectors")
 	if err := d.dnsRuleGen.UpdateSelectorManagement(fqdnSelUpdate); err != nil {
 		log.WithError(err).Error("error updating selector management")
 	}
+
+	log.Info("policyAdd: daemon done updating rulegen selectors")
 
 	// The rules are added, we can begin ToFQDN DNS polling for them
 	// Note: api.FQDNSelector.sanitize checks that the matchName entries are
