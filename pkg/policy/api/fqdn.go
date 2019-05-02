@@ -78,7 +78,7 @@ func (s *FQDNSelector) sanitize() error {
 // Matches returns whether the given DNS name is relevant to this FQDNSelector.
 func (s *FQDNSelector) Matches(dnsName string) bool {
 	preparedMatchName := strings.ToLower(dns.Fqdn(s.MatchName))
-	log.Info("Matches: checking if %s == %s", preparedMatchName, dnsName)
+	log.Infof("Matches: checking if %s == %s", preparedMatchName, dnsName)
 	if preparedMatchName == dnsName {
 		return true
 	}

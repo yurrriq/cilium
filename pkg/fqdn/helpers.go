@@ -43,7 +43,7 @@ func generateUUIDLabel() labels.Label {
 // injectToCIDRSetRules resets the ToCIDRSets of all egress rules containing
 // ToFQDN matches to the latest IPs in the cache.  Note: matchNames in rules
 // are made into FQDNs
-func mapSelectorsToIPs(fqdnSelectors map[api.FQDNSelector]struct{}, cache *DNSCache, reMap *regexpmap.RegexpMap) (emittedIPs map[string][]net.IP, selectorsMissingIPs []api.FQDNSelector, selectorIPMapping map[api.FQDNSelector][]net.IP) {
+func mapSelectorsToIPs(fqdnSelectors map[api.FQDNSelector]struct{}, cache *DNSCache) (emittedIPs map[string][]net.IP, selectorsMissingIPs []api.FQDNSelector, selectorIPMapping map[api.FQDNSelector][]net.IP) {
 	missing := make(map[api.FQDNSelector]struct{}) // a set to dedup missing dnsNames
 	emitted := make(map[string][]net.IP)           // name -> IPs we wrote out
 	selectorIPMapping = make(map[api.FQDNSelector][]net.IP)
@@ -79,12 +79,14 @@ func mapSelectorsToIPs(fqdnSelectors map[api.FQDNSelector]struct{}, cache *DNSCa
 			// lookup matching DNS names
 			dnsPattern := matchpattern.Sanitize(ToFQDN.MatchPattern)
 			patternREStr := matchpattern.ToRegexp(dnsPattern)
-			patternRE := reMap.GetPrecompiledRegexp(patternREStr)
-			var err error
-			if patternRE == nil {
-				if patternRE, err = regexp.Compile(patternREStr); err != nil {
-					log.WithError(err).Error("Error compiling matchPattern")
-				}
+			//patternRE := reMap.GetPrecompiledRegexp(patternREStr)
+			var (
+				err       error
+				patternRE *regexp.Regexp
+			)
+
+			if patternRE, err = regexp.Compile(patternREStr); err != nil {
+				log.WithError(err).Error("Error compiling matchPattern")
 			}
 			lookupIPs := cache.LookupByRegexp(patternRE)
 

@@ -18,7 +18,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net"
 	"strings"
@@ -257,7 +256,7 @@ func (d *Daemon) policyAdd(sourceRules policyAPI.Rules, opts *AddOptions, resCha
 	// IPs here. This would allow us to pre-populate the SelectorCache with the
 	// IPs that already have been resolved which correspond to DNS names that
 	// are in the newly added rules.
-	rules, _ := d.dnsRuleGen.PrepareFQDNRules(sourceRules)
+	/*rules, _ := d.dnsRuleGen.PrepareFQDNRules(sourceRules)
 	if len(rules) == 0 && len(sourceRules) > 0 {
 		// All rules being added have ToFQDNs UUIDs that have been removed and
 		// will not be re-inserted to avoid a race.
@@ -266,9 +265,9 @@ func (d *Daemon) policyAdd(sourceRules policyAPI.Rules, opts *AddOptions, resCha
 			newRev: 0,
 			err:    api.Error(PutPolicyFailureCode, err),
 		}
-	}
+	}*/
 
-	prefixes := policy.GetCIDRPrefixes(rules)
+	prefixes := policy.GetCIDRPrefixes(sourceRules)
 	logger.WithField("prefixes", prefixes).Debug("Policy imported via API, found CIDR prefixes...")
 
 	newPrefixLengths, err := d.prefixLengths.Add(prefixes)
@@ -347,7 +346,7 @@ func (d *Daemon) policyAdd(sourceRules policyAPI.Rules, opts *AddOptions, resCha
 
 	if opts != nil {
 		if opts.Replace {
-			for _, r := range rules {
+			for _, r := range sourceRules {
 				oldRules := d.policy.SearchRLocked(r.Labels)
 				removedPrefixes = append(removedPrefixes, policy.GetCIDRPrefixes(oldRules)...)
 				if len(oldRules) > 0 {
@@ -375,7 +374,7 @@ func (d *Daemon) policyAdd(sourceRules policyAPI.Rules, opts *AddOptions, resCha
 		}
 	}
 
-	addedRules, newRev := d.policy.AddListLocked(rules)
+	addedRules, newRev := d.policy.AddListLocked(sourceRules)
 
 	// The information needed by the caller is available at this point, signal
 	// accordingly.
@@ -458,11 +457,11 @@ func (d *Daemon) policyAdd(sourceRules policyAPI.Rules, opts *AddOptions, resCha
 
 	logger.WithField(logfields.PolicyRevision, newRev).Info("Policy imported via API, recalculating...")
 
-	labels := make([]string, 0, len(rules))
-	for _, r := range rules {
+	labels := make([]string, 0, len(sourceRules))
+	for _, r := range sourceRules {
 		labels = append(labels, r.Labels.GetModel()...)
 	}
-	repr, err := monitorAPI.PolicyUpdateRepr(len(rules), labels, newRev)
+	repr, err := monitorAPI.PolicyUpdateRepr(len(sourceRules), labels, newRev)
 	if err != nil {
 		logger.WithField(logfields.PolicyRevision, newRev).Warn("Failed to represent policy update as monitor notification")
 	} else {

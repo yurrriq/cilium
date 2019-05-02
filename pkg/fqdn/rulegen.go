@@ -16,11 +16,9 @@ package fqdn
 
 import (
 	"net"
-	"strings"
 	"time"
 
 	"github.com/cilium/cilium/pkg/fqdn/matchpattern"
-	"github.com/cilium/cilium/pkg/fqdn/regexpmap"
 	"github.com/cilium/cilium/pkg/labels"
 	"github.com/cilium/cilium/pkg/lock"
 	"github.com/cilium/cilium/pkg/logging/logfields"
@@ -71,11 +69,11 @@ type RuleGen struct {
 	// A lookup on sourceRules is looking for all rule UUIDs that have an exact
 	// match or a regex that would match.
 	// The UUID -> rule mapping is allRules below.
-	sourceRules *regexpmap.RegexpMap
+	//sourceRules *regexpmap.RegexpMap
 
 	// allRules is the global source of truth for rules we are managing. It maps
 	// UUID to the rule copy.
-	allRules map[string]*api.Rule
+	//allRules map[string]*api.Rule
 
 	// allSelectors contains all FQDNSelectors which are present in policy. We
 	// use these selectors to map selectors --> IPs.
@@ -100,10 +98,10 @@ func NewRuleGen(config Config) *RuleGen {
 	}
 
 	return &RuleGen{
-		config:       config,
-		namesToPoll:  make(map[string]struct{}),
-		sourceRules:  regexpmap.NewRegexpMap(),
-		allRules:     make(map[string]*api.Rule),
+		config:      config,
+		namesToPoll: make(map[string]struct{}),
+		//sourceRules:  regexpmap.NewRegexpMap(),
+		//allRules:     make(map[string]*api.Rule),
 		allSelectors: make(map[api.FQDNSelector]struct{}),
 		cache:        config.Cache,
 	}
@@ -125,7 +123,7 @@ func (gen *RuleGen) GetDNSCache() *DNSCache {
 // gen.AllRules
 // - A new FQDN rule that does not have UUID(new UUID will be created in this function)
 // NOTE: It edits the rules in-place
-func (gen *RuleGen) PrepareFQDNRules(sourceRules []*api.Rule) ([]*api.Rule, map[api.FQDNSelector][]net.IP) {
+/*func (gen *RuleGen) PrepareFQDNRules(sourceRules []*api.Rule) ([]*api.Rule, map[api.FQDNSelector][]net.IP) {
 	gen.Lock()
 	defer gen.Unlock()
 
@@ -187,7 +185,7 @@ perRule:
 	}
 
 	return result, selectorIPMapping
-}
+}*/
 
 type SelectorUpdate struct {
 	Added   map[api.FQDNSelector]struct{}
@@ -337,26 +335,32 @@ func (gen *RuleGen) UpdateGenerateDNS(lookupTime time.Time, updatedDNSIPs map[st
 // names in namesToRegen. These names are FQDNs and toFQDNs.matchPatterns or
 // matchNames that match them will cause these rules to regenerate.
 func (gen *RuleGen) ForceGenerateDNS(namesToRegen []string) error {
-	affectedRulesSet := make(map[string]struct{}, 0)
+	// Lock needed...?
+	affectedFQDNSels := make(map[api.FQDNSelector]struct{}, 0)
 	for _, dnsName := range namesToRegen {
-		for _, uuid := range gen.sourceRules.LookupValues(dnsName) {
-			affectedRulesSet[uuid] = struct{}{}
+		for fqdnSel := range gen.allSelectors {
+			if fqdnSel.Matches(dnsName) {
+
+			}
 		}
+		/*for _, uuid := range gen.sourceRules.LookupValues(dnsName) {
+			affectedRulesSet[uuid] = struct{}{}
+		}*/
 	}
 
 	// Convert the set to a list
-	var uuidsToUpdate []string
+	/*var uuidsToUpdate []string
 	for uuid := range affectedRulesSet {
 		uuidsToUpdate = append(uuidsToUpdate, uuid)
-	}
+	}*/
 
 	// Generate a new rule for each sourceRule that needs an update.
-	rulesToUpdate, notFoundUUIDs := gen.GetRulesByUUID(uuidsToUpdate)
+	/*rulesToUpdate, notFoundUUIDs := gen.GetRulesByUUID(uuidsToUpdate)
 	if len(notFoundUUIDs) != 0 {
 		log.WithField("uuid", strings.Join(notFoundUUIDs, ",")).
 			Debug("Did not find all rules during update")
-	}
-	generatedRules, namesMissingIPs, selectorIPMapping := gen.GenerateRulesFromSources(rulesToUpdate)
+	}*/
+	generatedRules, namesMissingIPs, selectorIPMapping := gen.GenerateMappingFromSources(affectedFQDNSels)
 	if len(namesMissingIPs) != 0 {
 		log.WithField(logfields.DNSName, namesMissingIPs).
 			Debug("No IPs to insert when generating DNS name selected by ToFQDN rule")
@@ -419,7 +423,7 @@ perDNSName:
 // notFoundUUIDs is the set of UUIDs not found. This can occur when a delete
 // races with other operations. It is benign in the sense that if a rule UUID is
 // not found, no action further action is needed.
-func (gen *RuleGen) GetRulesByUUID(uuids []string) (sourceRules []*api.Rule, notFoundUUIDs []string) {
+/*func (gen *RuleGen) GetRulesByUUID(uuids []string) (sourceRules []*api.Rule, notFoundUUIDs []string) {
 	gen.Lock()
 	defer gen.Unlock()
 
@@ -435,7 +439,7 @@ func (gen *RuleGen) GetRulesByUUID(uuids []string) (sourceRules []*api.Rule, not
 	}
 
 	return sourceRules, notFoundUUIDs
-}
+}*/
 
 // GenerateRulesFromSources creates new api.Rule instances with all ToFQDN
 // targets resolved to IPs. The IPs are in generated CIDRSet rules in the
@@ -445,7 +449,7 @@ func (gen *RuleGen) GenerateMappingFromSources(fqdnSelectors map[api.FQDNSelecto
 	gen.Lock()
 	defer gen.Unlock()
 
-	_, namesMissingIPs, selectorIPMapping = mapSelectorsToIPs(fqdnSelectors, gen.cache, gen.sourceRules)
+	_, namesMissingIPs, selectorIPMapping = mapSelectorsToIPs(fqdnSelectors, gen.cache)
 	return generatedRules, namesMissingIPs, selectorIPMapping
 }
 
@@ -453,7 +457,7 @@ func (gen *RuleGen) GenerateMappingFromSources(fqdnSelectors map[api.FQDNSelecto
 // targets resolved to IPs. The IPs are in generated CIDRSet rules in the
 // ToCIDRSet section. Pre-existing rules in ToCIDRSet are preserved
 // Note: GenerateRulesFromSources will make a copy of each sourceRule
-func (gen *RuleGen) GenerateRulesFromSources(sourceRules []*api.Rule) (generatedRules []*api.Rule, namesMissingIPs []api.FQDNSelector, selectorIPMapping map[api.FQDNSelector][]net.IP) {
+/*func (gen *RuleGen) GenerateRulesFromSources(sourceRules []*api.Rule) (generatedRules []*api.Rule, namesMissingIPs []api.FQDNSelector, selectorIPMapping map[api.FQDNSelector][]net.IP) {
 	gen.Lock()
 	defer gen.Unlock()
 
@@ -473,7 +477,7 @@ func (gen *RuleGen) GenerateRulesFromSources(sourceRules []*api.Rule) (generated
 	}
 
 	return generatedRules, namesMissingIPs, selectorIPMapping
-}
+}*/
 
 func (gen *RuleGen) updateDNSResources(selUpdate *SelectorUpdate) (newDNSNames, oldDNSNames []string, err error) {
 	// We need to "expand" the selectors to their string representation
@@ -565,7 +569,7 @@ func (gen *RuleGen) updateDNSResources(selUpdate *SelectorUpdate) (newDNSNames, 
 // rule, or that were seen in this rule but were already managed.
 // If newDNSNames and oldDNSNames are both empty, the rule was not added to the
 // managed list.
-func (gen *RuleGen) addRule(uuid string, sourceRule *api.Rule) (newDNSNames, oldDNSNames []string, err error) {
+/*func (gen *RuleGen) addRule(uuid string, sourceRule *api.Rule) (newDNSNames, oldDNSNames []string, err error) {
 	// if we are updating a rule, track which old dnsNames are removed. We store
 	// possible names to stop managing in namesToStopManaging. As we add names
 	// from the new rule below, these are cleared.
@@ -641,7 +645,7 @@ func (gen *RuleGen) addRule(uuid string, sourceRule *api.Rule) (newDNSNames, old
 	}
 
 	return newDNSNames, oldDNSNames, nil
-}
+}*/
 
 // removeRule removes an api.Rule from the source rule set for each DNS name,
 // and from the IPs if no rules depend on that DNS name.
@@ -679,12 +683,12 @@ func (gen *RuleGen) addRule(uuid string, sourceRule *api.Rule) (newDNSNames, old
 // removeFromDNSName removes the uuid from the list attached to a dns name. It
 // will clean up gen.sourceRules if needed.
 // shouldStopManaging indicates that no more rules rely on this DNS target
-func (gen *RuleGen) removeFromDNSName(dnsName, uuid string) (shouldStopManaging bool) {
+/*func (gen *RuleGen) removeFromDNSName(dnsName, uuid string) (shouldStopManaging bool) {
 	// remove the rule from the set of rules that rely on dnsName.
 	// Note: this isn't removing dnsName from gen.sourceRules, that is just
 	// below.
 	return gen.sourceRules.Remove(dnsName, uuid)
-}
+}*/
 
 // updateIPsName will update the IPs for dnsName. It always retains a copy of
 // newIPs.
