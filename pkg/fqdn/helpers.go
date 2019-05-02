@@ -43,6 +43,81 @@ func generateUUIDLabel() labels.Label {
 // injectToCIDRSetRules resets the ToCIDRSets of all egress rules containing
 // ToFQDN matches to the latest IPs in the cache.  Note: matchNames in rules
 // are made into FQDNs
+func mapSelectorsToIPs(fqdnSelectors map[api.FQDNSelector]struct{}, cache *DNSCache, reMap *regexpmap.RegexpMap) (emittedIPs map[string][]net.IP, selectorsMissingIPs []api.FQDNSelector, selectorIPMapping map[api.FQDNSelector][]net.IP) {
+	missing := make(map[api.FQDNSelector]struct{}) // a set to dedup missing dnsNames
+	emitted := make(map[string][]net.IP)           // name -> IPs we wrote out
+	selectorIPMapping = make(map[api.FQDNSelector][]net.IP)
+
+	// Build an IP collection to remove all duplicates
+	allIPs := []net.IP{}
+
+	// Map each FQDNSelector to set of CIDRs
+	for ToFQDN := range fqdnSelectors {
+		ipsSelected := make([]net.IP, 0)
+		// lookup matching DNS names
+		if len(ToFQDN.MatchName) > 0 {
+			dnsName := prepareMatchName(ToFQDN.MatchName)
+			lookupIPs := cache.Lookup(dnsName)
+
+			// Mark this name missing; it will be unmarked in the loop below
+			if len(lookupIPs) == 0 {
+				missing[ToFQDN] = struct{}{}
+			}
+
+			// Accumulate toCIDRSet rules
+			log.WithFields(logrus.Fields{
+				"DNSName":   dnsName,
+				"IPs":       lookupIPs,
+				"matchName": ToFQDN.MatchName,
+			}).Debug("Emitting matching DNS Name -> IPs for ToFQDNs Rule")
+			emitted[dnsName] = append(emitted[dnsName], lookupIPs...)
+			allIPs = append(allIPs, lookupIPs...)
+			ipsSelected = append(ipsSelected, lookupIPs...)
+		}
+
+		if len(ToFQDN.MatchPattern) > 0 {
+			// lookup matching DNS names
+			dnsPattern := matchpattern.Sanitize(ToFQDN.MatchPattern)
+			patternREStr := matchpattern.ToRegexp(dnsPattern)
+			patternRE := reMap.GetPrecompiledRegexp(patternREStr)
+			var err error
+			if patternRE == nil {
+				if patternRE, err = regexp.Compile(patternREStr); err != nil {
+					log.WithError(err).Error("Error compiling matchPattern")
+				}
+			}
+			lookupIPs := cache.LookupByRegexp(patternRE)
+
+			// Mark this pattern missing; it will be unmarked in the loop below
+			missing[ToFQDN] = struct{}{}
+
+			// Accumulate toCIDRSet rules
+			for name, ips := range lookupIPs {
+				log.WithFields(logrus.Fields{
+					"DNSName":      name,
+					"IPs":          ips,
+					"matchPattern": ToFQDN.MatchPattern,
+				}).Debug("Emitting matching DNS Name -> IPs for FQDNSelector")
+				delete(missing, ToFQDN)
+				emitted[name] = append(emitted[name], ips...)
+				allIPs = append(allIPs, ips...)
+				ipsSelected = append(ipsSelected, ips...)
+			}
+		}
+
+		ips := ip.KeepUniqueIPs(ipsSelected)
+		selectorIPMapping[ToFQDN] = ips
+	}
+
+	for dnsName := range missing {
+		selectorsMissingIPs = append(selectorsMissingIPs, dnsName)
+	}
+	return emitted, selectorsMissingIPs, selectorIPMapping
+}
+
+// injectToCIDRSetRules resets the ToCIDRSets of all egress rules containing
+// ToFQDN matches to the latest IPs in the cache.  Note: matchNames in rules
+// are made into FQDNs
 func injectToCIDRSetRules(rule *api.Rule, cache *DNSCache, reMap *regexpmap.RegexpMap) (emittedIPs map[string][]net.IP, selectorsMissingIPs []api.FQDNSelector, selectorIPMapping map[api.FQDNSelector][]net.IP) {
 	missing := make(map[api.FQDNSelector]struct{}) // a set to dedup missing dnsNames
 	emitted := make(map[string][]net.IP)           // name -> IPs we wrote out

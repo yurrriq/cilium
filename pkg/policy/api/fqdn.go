@@ -73,6 +73,25 @@ func (s *FQDNSelector) sanitize() error {
 	return err
 }
 
+// Matches returns whether the given DNS name is relevant to this FQDNSelector.
+func (s *FQDNSelector) Matches(dnsName string) bool {
+	if s.MatchName == dnsName {
+		return true
+	}
+
+	// Do regex matching. For now, we build a regex each time (which is horrible
+	// for performance, but we can optimize this away later.
+
+	// Validation has already occurred, ignore error.
+
+	regex, _ := matchpattern.Validate(s.MatchPattern)
+	if regex.MatchString(dnsName) {
+		return true
+	}
+
+	return false
+}
+
 // PortRuleDNS is a list of allowed DNS lookups.
 type PortRuleDNS FQDNSelector
 

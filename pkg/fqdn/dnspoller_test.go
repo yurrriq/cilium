@@ -195,7 +195,7 @@ func (ds *FQDNTestSuite) TestRuleGenRuleHandling(c *C) {
 
 		// delete rules listed in the test case (note: we don't delete any unless
 		// they are listed)
-		gen.StopManageDNSName(rulesToDelete)
+		//gen.StopManageDNSName(rulesToDelete)
 		for i := testCase.lookupIterationsAfterDelete; i > 0; i-- {
 			err := poller.LookupUpdateDNS(context.Background())
 			c.Assert(err, IsNil, Commentf("Error running DNS lookups"))

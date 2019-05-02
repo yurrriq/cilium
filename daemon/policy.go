@@ -351,7 +351,7 @@ func (d *Daemon) policyAdd(sourceRules policyAPI.Rules, opts *AddOptions, resCha
 				oldRules := d.policy.SearchRLocked(r.Labels)
 				removedPrefixes = append(removedPrefixes, policy.GetCIDRPrefixes(oldRules)...)
 				if len(oldRules) > 0 {
-					d.dnsRuleGen.StopManageDNSName(oldRules)
+					//d.dnsRuleGen.StopManageDNSName(oldRules)
 					deletedRules, _, _ := d.policy.DeleteByLabelsLocked(r.Labels)
 					deletedRules.UpdateRulesEndpointsCaches(endpointsToBumpRevision, endpointsToRegen, &policySelectionWG)
 					delEpSels, delFqdnSels := deletedRules.GetAllSelectors()
@@ -365,7 +365,7 @@ func (d *Daemon) policyAdd(sourceRules policyAPI.Rules, opts *AddOptions, resCha
 			removedPrefixes = append(removedPrefixes, policy.GetCIDRPrefixes(oldRules)...)
 			if len(oldRules) > 0 {
 				// TODO Ian remove this ?
-				d.dnsRuleGen.StopManageDNSName(oldRules)
+				//d.dnsRuleGen.StopManageDNSName(oldRules)
 				deletedRules, _, _ := d.policy.DeleteByLabelsLocked(opts.ReplaceWithLabels)
 				deletedRules.UpdateRulesEndpointsCaches(endpointsToBumpRevision, endpointsToRegen, &policySelectionWG)
 				delEpSels, delFqdnSels := deletedRules.GetAllSelectors()
@@ -399,7 +399,6 @@ func (d *Daemon) policyAdd(sourceRules policyAPI.Rules, opts *AddOptions, resCha
 	// sure that FQDN updates will get propagated to the SelectorCache!
 	_, removedFQDNSels := policy.UpdateSelectorCache(selCacheUpdate)
 
-
 	// Use which FQDNSelectors which were removed from SelectorCache to remove
 	// updates for from the FQDN subsystem.
 
@@ -414,14 +413,16 @@ func (d *Daemon) policyAdd(sourceRules policyAPI.Rules, opts *AddOptions, resCha
 		Added:   fqdnSelAddedMap,
 		Deleted: removedFQDNSels,
 	}
-	d.dnsRuleGen.UpdateSelectorManagement(fqdnSelUpdate)
+	if err := d.dnsRuleGen.UpdateSelectorManagement(fqdnSelUpdate); err != nil {
+		log.WithError(err).Error("error updating selector management")
+	}
 
 	// The rules are added, we can begin ToFQDN DNS polling for them
 	// Note: api.FQDNSelector.sanitize checks that the matchName entries are
 	// valid. This error should never happen (of course).
-	if err := d.dnsRuleGen.StartManageDNSName(rules); err != nil {
+	/*if err := d.dnsRuleGen.StartManageDNSName(rules); err != nil {
 		log.WithError(err).Warn("Error trying to manage rules during PolicyAdd")
-	}
+	}*/
 
 	addedRules.UpdateRulesEndpointsCaches(endpointsToBumpRevision, endpointsToRegen, &policySelectionWG)
 
@@ -649,7 +650,7 @@ func (d *Daemon) policyDelete(labels labels.LabelArray, res chan interface{}) {
 	}
 
 	// Stop polling for ToFQDN DNS names for these rules
-	d.dnsRuleGen.StopManageDNSName(rules)
+	//d.dnsRuleGen.StopManageDNSName(rules)
 
 	if option.Config.SelectiveRegeneration {
 		r := &PolicyReactionEvent{
