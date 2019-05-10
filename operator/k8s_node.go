@@ -109,6 +109,9 @@ func runNodeWatcher() error {
 				serNodes.Enqueue(func() error {
 					deletedNode := k8s.ParseNode(n, node.FromKubernetes)
 					ciliumNodeStore.DeleteLocalKey(deletedNode)
+					if err := ciliumK8sClient.CiliumV2().CiliumNodes("default").Delete(n.Name, &meta_v1.DeleteOptions{}); err == nil {
+						log.Info("Removed CiliumNode %s after receiving node deletion event", n.Name)
+					}
 					return nil
 				}, serializer.NoRetry)
 			},
