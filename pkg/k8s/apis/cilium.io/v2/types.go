@@ -547,3 +547,205 @@ type CiliumEndpointList struct {
 	// Items is a list of CiliumEndpoint
 	Items []CiliumEndpoint `json:"items"`
 }
+
+// +genclient
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+
+// CiliumNode represents a node managed by Cilium. It contains a specification
+// to control various node specific configuration aspects and a status section
+// to represent the status of the node
+type CiliumNode struct {
+	// +k8s:openapi-gen=false
+	metav1.TypeMeta `json:",inline"`
+	// +k8s:openapi-gen=false
+	metav1.ObjectMeta `json:"metadata"`
+
+	// Spec is the specification of the node
+	Spec NodeSpec `json:"spec"`
+
+	// Status it the status of the node
+	Status NodeStatus `json:"status"`
+}
+
+// NodeSpec is the configuration specific to a node
+type NodeSpec struct {
+	// ENI is the AWS ENI specific configuration
+	ENI ENISpec `json:"eni,omitempty"`
+
+	// IPAM is the address management specification. This section can be
+	// populated by a user or it can be automatically populated by an IPAM
+	// operator
+	IPAM IPAMSpec `json:"ipam,omitempty"`
+}
+
+// ENISpec is the ENI specification of a node. This specification is considered
+// by the cilium-operator to act as an IPAM operator and make ENI IPs available
+// via the IPAMSpec section.
+//
+// The ENI specification can either be provided manually or the cilium agent
+// running ont he node can be instructed to create the CiliumNode custom
+// resource along with an ENI specification when the node registers itself to
+// the Kubernetes cluster.
+type ENISpec struct {
+	// InstanceID is the AWS InstanceId of the node. The InstanceID is used
+	// to retrieve AWS metadata for the node.
+	InstanceID string `json:"instance-id,omitempty"`
+
+	// InstanceType is the AWS EC2 instance type, e.g. "m5.large"
+	InstanceType string `json:"instance-type,omitempty"`
+
+	// PreAllocate defines the number of IP addressses that must be
+	// available for allocation in the IPAMspec. It defines the buffer of
+	// addresses available immediately without requiring for the operator
+	// to get involved.
+	PreAllocate int `json:"preallocate,omitempty"`
+
+	// MaxAboveWatermark is the maximum number of addresses to allocate
+	// beyond the addresses needed to reach the PreAllocate watermark.
+	// Going above the watermark can help reduce the number of API calls to
+	// allocate IPs, e.g. when a new ENI is allocated, as many secondary
+	// IPs as possible are allocated. Limiting the amount can help reduce
+	// waste of IPs.
+	MaxAboveWatermark int `json:"max-above-watermark,omitempty"`
+
+	// FirstInterfaceIndex is the index of the first ENI to use for IP
+	// allocation, e.g. if the node has eth0, eth1, eth2 and
+	// FirstInterfaceIndex is set to 1, then only eth1 and eth2 will be
+	// used for IP allocation, eth0 will be ignored for PodIP allocation.
+	FirstInterfaceIndex int `json:"first-interface-index,omitempty"`
+
+	// SecurityGroups is the list of security groups to attach to any ENI
+	// that is created and attached to the instance.
+	SecurityGroups []string `json:"security-groups,omitempty"`
+
+	// SubnetTags is the list of tags to use when evaluating what AWS
+	// subnets to use for ENI and IP allocation
+	SubnetTags map[string]string `json:"subnet-tags,omitempty"`
+
+	// VpcID is the VPC ID to use when allocating ENIs
+	VpcID string `json:"vpc-id,omitempty"`
+
+	// AvailabilityZone is the availability zone to use when allocating ENIs
+	AvailabilityZone string `json:"availability-zone,omitempty"`
+
+	// DeleteOnTermination defines that the ENI should be deleted when the
+	// associated instance is terminated
+	DeleteOnTermination bool `json:"delete-on-termination,omitempty"`
+}
+
+// IPAMSpec is the IPAM specification of the node
+type IPAMSpec struct {
+	// Available is the list of IPs available to the node for allocation.
+	// When an IP is used, the IP will remain on this list but will be
+	// added to Status.IPAM.InUse
+	Available map[string]AllocationIP `json:"available,omitempty"`
+}
+
+// NodeStatus is the status of a node
+type NodeStatus struct {
+	// ENI is the AWS ENi specific status of the node
+	ENI ENIStatus `json:"eni,omitempty"`
+
+	// IPAM is the IPAM status of the node
+	IPAM IPAMStatus `json:"ipam,omitempty"`
+}
+
+// IPAMStatus is the IPAM status of a node
+type IPAMStatus struct {
+	// InUse lists all IPs out of Spec.IPAM.Available which have been
+	// allocated and are in use.
+	InUse map[string]AllocationIP `json:"used,omitempty"`
+}
+
+// AllocationIP is an IP available for allocation or already allocated
+type AllocationIP struct {
+	// Owner is the owner of the IP, this field is set if the IP has been
+	// allocated. It will be set to the pod name or another identifier
+	// representing the usage of the IP
+	Owner string `json:"owner,omitempty"`
+
+	// Resource is set for both available and allocated IPs, it represents
+	// what resource the IP is associated with, e.g. in combination with
+	// AWS ENI, this will refer to the ID of the ENI
+	Resource string `json:"resource,omitempty"`
+}
+
+// ENIStatus is the status of ENI addressing of the node
+type ENIStatus struct {
+	// ENIs is the list of ENIs on the node
+	ENIs map[string]ENI `json:"enis,omitempty"`
+}
+
+// ENI represents an AWS Elastic Network Interface
+type ENI struct {
+	// ID is the ENI ID
+	ID string
+
+	// IP is the primary IP of the ENI
+	IP string
+
+	// MAC is the mac address o the ENI
+	MAC string
+
+	// AvailabilityZone is the availability zone of the ENI
+	AvailabilityZone string
+
+	// InterfaceName is the name of the ENI interface
+	InterfaceName string
+
+	// Description is the description field of the ENI
+	Description string
+
+	// Number is the interface index, it used in combination with FirstInterfaceIndex
+	Number int
+
+	// Subnet is the subnet the ENI is associated with
+	Subnet AwsSubnet
+
+	// VPC is the VPC information to which the ENI is attached to
+	VPC AwsVPC
+
+	// Addresses is the list of all IPs associated with the ENI, including all secondary addresses
+	Addresses []string
+
+	// SecurityGroups are the security groups associated with the ENI
+	SecurityGroups []string
+
+	// availabilityZone caches the availability zone of the ENI
+	availabilityZone string
+
+	// instanceID caches the instance ID to which this ENI is associated with
+	instanceID string
+}
+
+// AwsSubnet stores information regarding an AWS subnet
+type AwsSubnet struct {
+	// ID is the ID of the subnet
+	ID string
+
+	// CIDR is the CIDR range associated with the subnet
+	CIDR string
+}
+
+// AwsVPC stores information regarding an AWS VPC
+type AwsVPC struct {
+	/// ID is the ID of a VPC
+	ID string
+
+	// PrimaryCIDR is the primary CIDR of the VPC
+	PrimaryCIDR string
+
+	// CIDRs is the list of CIDR ranges associated with the VPC
+	CIDRs []string
+}
+
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+//
+// CiliumNodeList is a list of CiliumNode objects
+type CiliumNodeList struct {
+	metav1.TypeMeta `json:",inline"`
+	metav1.ListMeta `json:"metadata"`
+
+	// Items is a list of CiliumNode
+	Items []CiliumNode `json:"items"`
+}
