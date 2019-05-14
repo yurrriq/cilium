@@ -236,4 +236,8 @@ const (
 	// MonitorBufferPages is the default number of pages to use for the
 	// ring buffer interacting with the kernel
 	MonitorBufferPages = 64
+
+	// AutoCreateCiliumNodeResource enables automatic creation of a
+	// CiliumNode resource for the local node
+	AutoCreateCiliumNodeResource = false
 )
