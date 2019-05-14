@@ -991,6 +991,8 @@ type DaemonConfig struct {
 	// AutoCreateCiliumNodeResource enables automatic creation of a
 	// CiliumNode resource for the local node
 	AutoCreateCiliumNodeResource bool
+
+	EnableENI bool
 }
 
 var (
@@ -1020,6 +1022,7 @@ var (
 		AnnotateK8sNode:              defaults.AnnotateK8sNode,
 		IPAM:                         IPAMHostScope,
 		AutoCreateCiliumNodeResource: defaults.AutoCreateCiliumNodeResource,
+		EnableENI:                    true,
 	}
 )
 
