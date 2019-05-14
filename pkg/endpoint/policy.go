@@ -18,7 +18,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"reflect"
 	"strconv"
 	"strings"
 	"time"
@@ -29,7 +28,6 @@ import (
 	endpointid "github.com/cilium/cilium/pkg/endpoint/id"
 	"github.com/cilium/cilium/pkg/eventqueue"
 	identityPkg "github.com/cilium/cilium/pkg/identity"
-	"github.com/cilium/cilium/pkg/identity/cache"
 	"github.com/cilium/cilium/pkg/identity/identitymanager"
 	"github.com/cilium/cilium/pkg/ipcache"
 	k8sConst "github.com/cilium/cilium/pkg/k8s/apis/cilium.io"
@@ -40,7 +38,6 @@ import (
 	"github.com/cilium/cilium/pkg/node"
 	"github.com/cilium/cilium/pkg/option"
 	"github.com/cilium/cilium/pkg/policy"
-	"github.com/cilium/cilium/pkg/policy/distillery"
 	"github.com/cilium/cilium/pkg/revert"
 
 	"github.com/sirupsen/logrus"
@@ -76,12 +73,13 @@ func (e *Endpoint) updateNetworkPolicy(owner Owner, proxyWaitGroup *completion.W
 		return nil, nil
 	}
 
-	// Publish the updated policy to L7 proxies.
-	var desiredL4Policy *policy.L4Policy
-	if e.desiredPolicy != nil {
-		desiredL4Policy = e.desiredPolicy.L4Policy
+	// If desired L4Policy is nil then no policy change is needed.
+	if e.desiredPolicy == nil || e.desiredPolicy.L4Policy == nil {
+		return nil, nil
 	}
-	return owner.UpdateNetworkPolicy(e, desiredL4Policy, *e.prevIdentityCache, proxyWaitGroup)
+
+	// Publish the updated policy to L7 proxies.
+	return owner.UpdateNetworkPolicy(e, e.desiredPolicy.L4Policy, proxyWaitGroup)
 }
 
 // setNextPolicyRevision updates the desired policy revision field
@@ -120,21 +118,6 @@ func (e *Endpoint) regeneratePolicy(owner Owner) (retErr error) {
 	stats := &policyRegenerationStatistics{}
 	stats.totalTime.Start()
 
-	// Collect label arrays before policy computation, as this can fail.
-	// GH-1128 should allow optimizing this away, but currently we can't
-	// reliably know if the KV-store has changed or not, so we must scan
-	// through it each time.
-	stats.waitingForIdentityCache.Start()
-	identityCache := cache.GetIdentityCache()
-	labelsMap := &identityCache
-	stats.waitingForIdentityCache.End(true)
-
-	// Use the old labelsMap instance if the new one is still the same.
-	// Later we can compare the pointers to figure out if labels have changed or not.
-	if reflect.DeepEqual(e.prevIdentityCache, labelsMap) {
-		labelsMap = e.prevIdentityCache
-	}
-
 	stats.waitingForPolicyRepository.Start()
 	repo := owner.GetPolicyRepository()
 	repo.Mutex.RLock()
@@ -142,10 +125,18 @@ func (e *Endpoint) regeneratePolicy(owner Owner) (retErr error) {
 	defer repo.Mutex.RUnlock()
 	stats.waitingForPolicyRepository.End(true)
 
+	// Collect label arrays before policy computation, as this can fail.
+	// GH-1128 should allow optimizing this away, but currently we can't
+	// reliably know if the KV-store has changed or not, so we must scan
+	// through it each time.
+	stats.waitingForIdentityCache.Start()
+	prevIdentityCacheRevision := repo.GetSelectorCache().GetIDCacheRevision()
+	stats.waitingForIdentityCache.End(true)
+
 	// Recompute policy for this endpoint only if not already done for this revision.
 	// Must recompute if labels have changed.
 	if !e.forcePolicyCompute && e.nextPolicyRevision >= revision &&
-		labelsMap == e.prevIdentityCache {
+		e.prevIdentityCacheRevision == prevIdentityCacheRevision {
 
 		e.getLogger().WithFields(logrus.Fields{
 			"policyRevision.next": e.nextPolicyRevision,
@@ -158,7 +149,7 @@ func (e *Endpoint) regeneratePolicy(owner Owner) (retErr error) {
 
 	// Update fields within endpoint based off known identities, and whether
 	// policy needs to be enforced for either ingress or egress.
-	e.prevIdentityCache = labelsMap
+	e.prevIdentityCacheRevision = prevIdentityCacheRevision
 
 	stats.policyCalculation.Start()
 	if e.selectorPolicy == nil {
@@ -167,7 +158,7 @@ func (e *Endpoint) regeneratePolicy(owner Owner) (retErr error) {
 		// assigned after the endpoint is added to the endpointmanager
 		// (and hence also the identitymanager). In that case, detect
 		// that the selectorPolicy is not set and find it.
-		e.selectorPolicy = distillery.Lookup(e.SecurityIdentity)
+		e.selectorPolicy = repo.GetPolicyCache().Lookup(e.SecurityIdentity)
 		if e.selectorPolicy == nil {
 			err := fmt.Errorf("no cached selectorPolicy found")
 			e.getLogger().WithError(err).Warning("Failed to regenerate from cached policy")
@@ -176,11 +167,11 @@ func (e *Endpoint) regeneratePolicy(owner Owner) (retErr error) {
 	}
 	// TODO: GH-7515: This should be triggered closer to policy change
 	// handlers, but for now let's just update it here.
-	if err := distillery.UpdatePolicy(repo, e.SecurityIdentity); err != nil {
+	if err := repo.GetPolicyCache().UpdatePolicy(e.SecurityIdentity); err != nil {
 		e.getLogger().WithError(err).Warning("Failed to update policy")
 		return err
 	}
-	calculatedPolicy := e.selectorPolicy.Consume(e, *labelsMap)
+	calculatedPolicy := e.selectorPolicy.Consume(e)
 	stats.policyCalculation.End(true)
 
 	e.desiredPolicy = calculatedPolicy
@@ -386,7 +377,7 @@ func (e *Endpoint) updateRealizedState(stats *regenerationStatistics, origDir st
 	e.realizedBPFConfig = e.desiredBPFConfig
 
 	// Set realized state to desired state fields.
-	e.realizedPolicy.Realizes(e.desiredPolicy)
+	e.realizedPolicy = e.desiredPolicy
 
 	// Mark the endpoint to be running the policy revision it was
 	// compiled for

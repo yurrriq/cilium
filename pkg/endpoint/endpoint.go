@@ -52,7 +52,6 @@ import (
 	"github.com/cilium/cilium/pkg/monitor/notifications"
 	"github.com/cilium/cilium/pkg/option"
 	"github.com/cilium/cilium/pkg/policy"
-	"github.com/cilium/cilium/pkg/policy/distillery"
 	"github.com/cilium/cilium/pkg/policy/trafficdirection"
 	"github.com/cilium/cilium/pkg/proxy/accesslog"
 	"github.com/cilium/cilium/pkg/trigger"
@@ -188,9 +187,9 @@ type Endpoint struct {
 	// TODO: Currently this applies only to HTTP L7 rules. Kafka L7 rules are still enforced by Cilium's node-wide Kafka proxy.
 	hasSidecarProxy bool
 
-	// prevIdentityCache is the set of all security identities used in the
+	// prevIdentityCacheRevision is the revision of the identity cache used in the
 	// previous policy computation
-	prevIdentityCache *cache.IdentityCache
+	prevIdentityCacheRevision uint64
 
 	// PolicyMap is the policy related state of the datapath including
 	// reference to all policy related BPF
@@ -292,7 +291,7 @@ type Endpoint struct {
 
 	// selectorPolicy represents a reference to the shared SelectorPolicy
 	// for all endpoints that have the same Identity.
-	selectorPolicy distillery.SelectorPolicy
+	selectorPolicy policy.SelectorPolicy
 
 	desiredPolicy *policy.EndpointPolicy
 
@@ -419,19 +418,20 @@ func (e *Endpoint) WaitForProxyCompletions(proxyWaitGroup *completion.WaitGroup)
 }
 
 // NewEndpointWithState creates a new endpoint useful for testing purposes
-func NewEndpointWithState(ID uint16, state string) *Endpoint {
+func NewEndpointWithState(repo *policy.Repository, ID uint16, state string) *Endpoint {
 	ep := &Endpoint{
-		ID:             ID,
-		OpLabels:       pkgLabels.NewOpLabels(),
-		Status:         NewEndpointStatus(),
-		DNSHistory:     fqdn.NewDNSCacheWithLimit(option.Config.ToFQDNsMinTTL, option.Config.ToFQDNsMaxIPsPerHost),
-		state:          state,
-		hasBPFProgram:  make(chan struct{}, 0),
-		controllers:    controller.NewManager(),
-		EventQueue:     eventqueue.NewEventQueueBuffered(fmt.Sprintf("endpoint-%d", ID), option.Config.EndpointQueueSize),
-		desiredPolicy:  policy.NewEndpointPolicy(),
-		realizedPolicy: policy.NewEndpointPolicy(),
+		ID:            ID,
+		OpLabels:      pkgLabels.NewOpLabels(),
+		Status:        NewEndpointStatus(),
+		DNSHistory:    fqdn.NewDNSCacheWithLimit(option.Config.ToFQDNsMinTTL, option.Config.ToFQDNsMaxIPsPerHost),
+		state:         state,
+		hasBPFProgram: make(chan struct{}, 0),
+		controllers:   controller.NewManager(),
+		EventQueue:    eventqueue.NewEventQueueBuffered(fmt.Sprintf("endpoint-%d", ID), option.Config.EndpointQueueSize),
+		desiredPolicy: policy.NewEndpointPolicy(repo),
 	}
+	ep.realizedPolicy = ep.desiredPolicy
+
 	ep.SetDefaultOpts(option.Config.Opts)
 	ep.UpdateLogger(nil)
 
@@ -441,7 +441,7 @@ func NewEndpointWithState(ID uint16, state string) *Endpoint {
 }
 
 // NewEndpointFromChangeModel creates a new endpoint from a request
-func NewEndpointFromChangeModel(base *models.EndpointChangeRequest) (*Endpoint, error) {
+func NewEndpointFromChangeModel(repo *policy.Repository, base *models.EndpointChangeRequest) (*Endpoint, error) {
 	if base == nil {
 		return nil, nil
 	}
@@ -462,10 +462,10 @@ func NewEndpointFromChangeModel(base *models.EndpointChangeRequest) (*Endpoint, 
 		state:            "",
 		Status:           NewEndpointStatus(),
 		hasBPFProgram:    make(chan struct{}, 0),
-		desiredPolicy:    policy.NewEndpointPolicy(),
-		realizedPolicy:   policy.NewEndpointPolicy(),
+		desiredPolicy:    policy.NewEndpointPolicy(repo),
 		controllers:      controller.NewManager(),
 	}
+	ep.realizedPolicy = ep.desiredPolicy
 
 	if base.Mac != "" {
 		m, err := mac.ParseMAC(base.Mac)
@@ -768,11 +768,8 @@ func (e *Endpoint) GetPolicyModel() *models.EndpointPolicyStatus {
 		desiredL4Policy   *policy.L4Policy
 	)
 	if e.desiredPolicy != nil {
-		desiredL4Policy = e.desiredPolicy.L4Policy
 		desiredCIDRPolicy = e.desiredPolicy.CIDRPolicy
-	} else {
-		desiredL4Policy = &policy.L4Policy{}
-		desiredCIDRPolicy = &policy.CIDRPolicy{}
+		desiredL4Policy = e.desiredPolicy.L4Policy
 	}
 
 	desiredMdl := &models.EndpointPolicy{
@@ -939,6 +936,7 @@ func (e *Endpoint) GetIdentity() identityPkg.NumericIdentity {
 	return identityPkg.InvalidIdentity
 }
 
+// Allows is only used for unit testing
 func (e *Endpoint) Allows(id identityPkg.NumericIdentity) bool {
 	e.UnconditionalRLock()
 	defer e.RUnlock()
@@ -1063,7 +1061,7 @@ func FilterEPDir(dirFiles []os.FileInfo) []string {
 
 // ParseEndpoint parses the given strEp which is in the form of:
 // common.CiliumCHeaderPrefix + common.Version + ":" + endpointBase64
-func ParseEndpoint(strEp string) (*Endpoint, error) {
+func ParseEndpoint(repo *policy.Repository, strEp string) (*Endpoint, error) {
 	// TODO: Provide a better mechanism to update from old version once we bump
 	// TODO: cilium version.
 	strEpSlice := strings.Split(strEp, ":")
@@ -1083,8 +1081,8 @@ func ParseEndpoint(strEp string) (*Endpoint, error) {
 
 	// Initialize fields to values which are non-nil that are not serialized.
 	ep.hasBPFProgram = make(chan struct{}, 0)
-	ep.desiredPolicy = policy.NewEndpointPolicy()
-	ep.realizedPolicy = policy.NewEndpointPolicy()
+	ep.desiredPolicy = policy.NewEndpointPolicy(repo)
+	ep.realizedPolicy = ep.desiredPolicy
 	ep.controllers = controller.NewManager()
 
 	// We need to check for nil in Status, CurrentStatuses and Log, since in
@@ -1331,7 +1329,7 @@ func (e *Endpoint) LeaveLocked(owner Owner, proxyWaitGroup *completion.WaitGroup
 	loader.Unload(e.createEpInfoCache(""))
 
 	owner.RemoveFromEndpointQueue(uint64(e.ID))
-	if e.SecurityIdentity != nil && e.realizedPolicy != nil && e.realizedPolicy.L4Policy != nil {
+	if e.SecurityIdentity != nil && len(e.realizedRedirects) > 0 {
 		// Passing a new map of nil will purge all redirects
 		e.removeOldRedirects(owner, nil, proxyWaitGroup)
 	}

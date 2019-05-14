@@ -27,6 +27,7 @@ import (
 	"github.com/cilium/cilium/pkg/endpoint"
 	"github.com/cilium/cilium/pkg/endpointmanager"
 	"github.com/cilium/cilium/pkg/identity"
+	"github.com/cilium/cilium/pkg/identity/cache"
 	"github.com/cilium/cilium/pkg/logging/logfields"
 	"github.com/cilium/cilium/pkg/policy"
 	"github.com/cilium/cilium/pkg/policy/api"
@@ -44,9 +45,20 @@ func Test(t *testing.T) {
 	TestingT(t)
 }
 
-type proxyTestSuite struct{}
+type proxyTestSuite struct {
+	repo *policy.Repository
+}
 
 var _ = Suite(&proxyTestSuite{})
+
+func (s *proxyTestSuite) SetUpSuite(c *C) {
+	s.repo = policy.NewPolicyRepository()
+}
+
+type DummySelectorCacheUser struct{}
+
+func (d *DummySelectorCacheUser) IdentitySelectionUpdated(selector policy.CachedSelector, selections, added, deleted []identity.NumericIdentity) {
+}
 
 var (
 	localEndpointMock logger.EndpointUpdater = &proxyUpdaterMock{
@@ -56,6 +68,11 @@ var (
 		labels:   []string{"id.foo", "id.bar"},
 		identity: identity.NumericIdentity(256),
 	}
+
+	dummySelectorCacheUser = &DummySelectorCacheUser{}
+	testSelectorCache      = policy.NewSelectorCache(cache.IdentityCache{})
+
+	wildcardCachedSelector, _ = testSelectorCache.AddIdentitySelector(dummySelectorCacheUser, api.WildcardEndpointSelector)
 )
 
 // newTestBrokerConf returns BrokerConf with default configuration adjusted for
@@ -171,7 +188,7 @@ func (m *metadataTester) Handler() RequestHandler {
 	}
 }
 
-func (k *proxyTestSuite) TestKafkaRedirect(c *C) {
+func (s *proxyTestSuite) TestKafkaRedirect(c *C) {
 	server := NewServer()
 	server.Start()
 	defer server.Close()
@@ -199,7 +216,7 @@ func (k *proxyTestSuite) TestKafkaRedirect(c *C) {
 
 	// Insert a mock EP to the endpointmanager so that DefaultEndpointInfoRegistry may find
 	// the EP ID by the IP.
-	ep := endpoint.NewEndpointWithState(uint16(localEndpointMock.GetID()), endpoint.StateReady)
+	ep := endpoint.NewEndpointWithState(s.repo, uint16(localEndpointMock.GetID()), endpoint.StateReady)
 	ipv4, err := addressing.NewCiliumIPv4("127.0.0.1")
 	c.Assert(err, IsNil)
 	ep.IPv4 = ipv4
@@ -214,7 +231,7 @@ func (k *proxyTestSuite) TestKafkaRedirect(c *C) {
 	r := newRedirect(localEndpointMock, pp, uint16(portInt))
 
 	r.rules = policy.L7DataMap{
-		api.WildcardEndpointSelector: api.L7Rules{
+		wildcardCachedSelector: api.L7Rules{
 			Kafka: []api.PortRuleKafka{kafkaRule1, kafkaRule2},
 		},
 	}

@@ -74,6 +74,8 @@ func (ds *PolicyTestSuite) SetUpSuite(c *C) {
 	var wg sync.WaitGroup
 	SetPolicyEnabled(option.DefaultEnforcement)
 	GenerateNumIdentities(3000)
+	testSelectorCache.UpdateIdentities(identityCache, nil)
+	repo.selectorCache = testSelectorCache
 	rulez, _ := repo.AddList(GenerateNumRules(1000))
 
 	epSet := NewEndpointSet(5)
@@ -166,8 +168,8 @@ func (d DummyOwner) GetSecurityIdentity() *identity.Identity {
 func (ds *PolicyTestSuite) BenchmarkRegeneratePolicyRules(c *C) {
 	c.ResetTimer()
 	for i := 0; i < c.N; i++ {
-		ip, _ := repo.ResolvePolicyLocked(fooIdentity)
-		_ = ip.DistillPolicy(DummyOwner{}, identityCache)
+		ip, _ := repo.resolvePolicyLocked(fooIdentity)
+		_ = ip.DistillPolicy(DummyOwner{})
 	}
 }
 
@@ -181,6 +183,7 @@ func (ds *PolicyTestSuite) TestL7WithIngressWildcard(c *C) {
 	fooIdentity := identity.NewIdentity(12345, idFooSelectLabels)
 
 	repo := NewPolicyRepository()
+	repo.selectorCache = testSelectorCache
 
 	selFoo := api.NewESFromLabels(labels.ParseSelectLabel("id=foo"))
 	rule1 := api.Rule{
@@ -207,28 +210,28 @@ func (ds *PolicyTestSuite) TestL7WithIngressWildcard(c *C) {
 
 	repo.Mutex.RLock()
 	defer repo.Mutex.RUnlock()
-	identityCache = cache.GetIdentityCache()
-	identityPolicy, err := repo.ResolvePolicyLocked(fooIdentity)
+	selPolicy, err := repo.resolvePolicyLocked(fooIdentity)
 	c.Assert(err, IsNil)
-	policy := identityPolicy.DistillPolicy(DummyOwner{}, identityCache)
+	policy := selPolicy.DistillPolicy(DummyOwner{})
 
 	expectedEndpointPolicy := EndpointPolicy{
-		SelectorPolicy: &SelectorPolicy{
-			Revision: repo.GetRevision(),
+		selectorPolicy: &selectorPolicy{
+			Revision:      repo.GetRevision(),
+			SelectorCache: repo.GetSelectorCache(),
 			L4Policy: &L4Policy{
 				Ingress: L4PolicyMap{
 					"80/TCP": {
 						Port:     80,
 						Protocol: api.ProtoTCP,
 						U8Proto:  0x6,
-						Endpoints: []api.EndpointSelector{
-							api.WildcardEndpointSelector,
+						CachedSelectors: CachedSelectorSlice{
+							wildcardCachedSelector,
 						},
 						allowsAllAtL3: true,
 						L7Parser:      ParserTypeHTTP,
 						Ingress:       true,
 						L7RulesPerEp: L7DataMap{
-							api.WildcardEndpointSelector: api.L7Rules{
+							wildcardCachedSelector: api.L7Rules{
 								HTTP: []api.PortRuleHTTP{{Method: "GET", Path: "/good"}},
 							},
 						},
@@ -247,7 +250,7 @@ func (ds *PolicyTestSuite) TestL7WithIngressWildcard(c *C) {
 		PolicyMapState: policy.PolicyMapState,
 	}
 
-	c.Assert(policy, checker.DeepEquals, &expectedEndpointPolicy)
+	c.Assert(policy, checker.Equals, &expectedEndpointPolicy)
 }
 
 func (ds *PolicyTestSuite) TestL7WithLocalHostWildcardd(c *C) {
@@ -265,6 +268,7 @@ func (ds *PolicyTestSuite) TestL7WithLocalHostWildcardd(c *C) {
 	defer func() { option.Config.AllowLocalhost = oldLocalhostOpt }()
 
 	repo := NewPolicyRepository()
+	repo.selectorCache = testSelectorCache
 
 	selFoo := api.NewESFromLabels(labels.ParseSelectLabel("id=foo"))
 	rule1 := api.Rule{
@@ -292,31 +296,35 @@ func (ds *PolicyTestSuite) TestL7WithLocalHostWildcardd(c *C) {
 	repo.Mutex.RLock()
 	defer repo.Mutex.RUnlock()
 
-	identityCache = cache.GetIdentityCache()
-	identityPolicy, err := repo.ResolvePolicyLocked(fooIdentity)
+	selPolicy, err := repo.resolvePolicyLocked(fooIdentity)
 	c.Assert(err, IsNil)
-	policy := identityPolicy.DistillPolicy(DummyOwner{}, identityCache)
+	policy := selPolicy.DistillPolicy(DummyOwner{})
+
+	cachedSelectorHost := testSelectorCache.FindCachedIdentitySelector(api.ReservedEndpointSelectors[labels.IDNameHost])
+	c.Assert(cachedSelectorHost, Not(IsNil))
 
 	expectedEndpointPolicy := EndpointPolicy{
-		SelectorPolicy: &SelectorPolicy{
-			Revision: repo.GetRevision(),
+		selectorPolicy: &selectorPolicy{
+			Revision:      repo.GetRevision(),
+			SelectorCache: repo.GetSelectorCache(),
 			L4Policy: &L4Policy{
 				Ingress: L4PolicyMap{
 					"80/TCP": {
 						Port:     80,
 						Protocol: api.ProtoTCP,
 						U8Proto:  0x6,
-						Endpoints: []api.EndpointSelector{
-							api.WildcardEndpointSelector,
+						CachedSelectors: CachedSelectorSlice{
+							wildcardCachedSelector,
+							cachedSelectorHost,
 						},
 						allowsAllAtL3: true,
 						L7Parser:      ParserTypeHTTP,
 						Ingress:       true,
 						L7RulesPerEp: L7DataMap{
-							api.WildcardEndpointSelector: api.L7Rules{
+							wildcardCachedSelector: api.L7Rules{
 								HTTP: []api.PortRuleHTTP{{Method: "GET", Path: "/good"}},
 							},
-							api.ReservedEndpointSelectors[labels.IDNameHost]: api.L7Rules{},
+							cachedSelectorHost: api.L7Rules{},
 						},
 						DerivedFromRules: labels.LabelArrayList{nil},
 					},
@@ -333,5 +341,5 @@ func (ds *PolicyTestSuite) TestL7WithLocalHostWildcardd(c *C) {
 		PolicyMapState: policy.PolicyMapState,
 	}
 
-	c.Assert(policy, checker.DeepEquals, &expectedEndpointPolicy)
+	c.Assert(policy, checker.Equals, &expectedEndpointPolicy)
 }
