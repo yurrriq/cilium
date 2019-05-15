@@ -23,6 +23,7 @@ import (
 	"github.com/cilium/cilium/pkg/logging"
 	"github.com/cilium/cilium/pkg/logging/logfields"
 	"github.com/cilium/cilium/pkg/option"
+	cnitypes "github.com/cilium/cilium/plugins/cilium-cni/types"
 
 	"github.com/sirupsen/logrus"
 	"github.com/vishvananda/netlink"
@@ -57,8 +58,12 @@ type Configuration struct {
 	EnableIPv6 bool
 }
 
+type Owner interface {
+	GetNetConf() *cnitypes.NetConf
+}
+
 // NewIPAM returns a new IP address manager
-func NewIPAM(nodeAddressing datapath.NodeAddressing, c Configuration) *IPAM {
+func NewIPAM(nodeAddressing datapath.NodeAddressing, c Configuration, owner Owner) *IPAM {
 	ipam := &IPAM{
 		nodeAddressing: nodeAddressing,
 		config:         c,
@@ -85,11 +90,11 @@ func NewIPAM(nodeAddressing datapath.NodeAddressing, c Configuration) *IPAM {
 	case option.IPAMCRD:
 		log.Info("Initializing CRD-based IPAM")
 		if c.EnableIPv6 {
-			ipam.IPv6Allocator = newCRDAllocator(IPv6)
+			ipam.IPv6Allocator = newCRDAllocator(IPv6, owner)
 		}
 
 		if c.EnableIPv4 {
-			ipam.IPv4Allocator = newCRDAllocator(IPv4)
+			ipam.IPv4Allocator = newCRDAllocator(IPv4, owner)
 		}
 	default:
 		log.Fatalf("Unknown IPAM backend %s", option.Config.IPAM)

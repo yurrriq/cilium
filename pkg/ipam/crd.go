@@ -52,7 +52,7 @@ type nodeStore struct {
 	availableIPs   map[Family]int
 }
 
-func newNodeStore() *nodeStore {
+func newNodeStore(owner Owner) *nodeStore {
 	log.Infof("Subscribed to CiliumNode custom resource for node %s", node.GetName())
 	store := &nodeStore{
 		allocators:   []*crdAllocator{},
@@ -71,6 +71,28 @@ func newNodeStore() *nodeStore {
 			instanceID, instanceType, availabilityZone, err := aws.GetInstanceMetadata()
 			if err != nil {
 				log.WithError(err).Fatal("Unable to retrieve InstanceID of own EC2 instance")
+			}
+
+			if c := owner.GetNetConf(); c != nil {
+				if c.ENI.PreAllocate != 0 {
+					nodeResource.Spec.ENI.PreAllocate = c.ENI.PreAllocate
+				}
+
+				if c.ENI.FirstInterfaceIndex != 0 {
+					nodeResource.Spec.ENI.FirstInterfaceIndex = c.ENI.FirstInterfaceIndex
+				}
+
+				if len(c.ENI.SecurityGroups) > 0 {
+					nodeResource.Spec.ENI.SecurityGroups = c.ENI.SecurityGroups
+				}
+
+				if len(c.ENI.SubnetTags) > 0 {
+					nodeResource.Spec.ENI.SubnetTags = c.ENI.SubnetTags
+				}
+
+				if c.ENI.VpcID != "" {
+					nodeResource.Spec.ENI.VpcID = c.ENI.VpcID
+				}
 			}
 
 			nodeResource.Spec.ENI.InstanceID = instanceID
@@ -307,17 +329,19 @@ type crdAllocator struct {
 	mutex     lock.RWMutex
 	allocated map[string]ciliumv2.AllocationIP
 	family    Family
+	owner     Owner
 }
 
-func newCRDAllocator(family Family) Allocator {
+func newCRDAllocator(family Family, owner Owner) Allocator {
 	initNodeStore.Do(func() {
-		sharedNodeStore = newNodeStore()
+		sharedNodeStore = newNodeStore(owner)
 	})
 
 	allocator := &crdAllocator{
 		allocated: map[string]ciliumv2.AllocationIP{},
 		family:    family,
 		store:     sharedNodeStore,
+		owner:     owner,
 	}
 
 	sharedNodeStore.mutex.Lock()
