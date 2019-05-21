@@ -829,7 +829,7 @@ func initEnv(cmd *cobra.Command) {
 	option.Config.Populate()
 
 	// Logging should always be bootstrapped first. Do not add any code above this!
-	logging.SetupLogging(option.Config.LogDriver, option.Config.LogOpt, "cilium-agent", option.Config.Debug)
+	logging.SetupLogging(option.Config.LogDriver, option.Config.LogOpt, "cilium-agent", true)
 
 	if option.Config.CMDRefDir != "" {
 		genMarkdown(cmd)
