@@ -68,7 +68,7 @@ func (dr *dnsRedirect) setRules(wg *completion.WaitGroup, newRules policy.L7Data
 		}
 	}
 
-	log.WithField("rulesInRedirect", logfields.Repr(dr.currentRules)).Debug("setRules: redirect rules")
+	log.WithField("rulesInRedirect", logfields.Repr(dr.redirect.rules)).Debug("setRules: redirect rules")
 
 	for _, rule := range dr.redirect.rules {
 		for _, dnsRule := range rule.DNS {
