@@ -50,7 +50,10 @@ type dnsConfiguration struct {
 func (dr *dnsRedirect) setRules(wg *completion.WaitGroup, newRules policy.L7DataMap) error {
 	var toRemove, toAdd []string
 
+	log.WithField("currentRedirectRules", logfields.Repr(dr.currentRules)).Debug("setRules: currentRules in redirect")
+
 	for _, rule := range dr.currentRules {
+
 		for _, dnsRule := range rule.DNS {
 			if len(dnsRule.MatchName) > 0 {
 				dnsName := strings.ToLower(dns.Fqdn(dnsRule.MatchName))
@@ -64,6 +67,8 @@ func (dr *dnsRedirect) setRules(wg *completion.WaitGroup, newRules policy.L7Data
 			}
 		}
 	}
+
+	log.WithField("rulesInRedirect", logfields.Repr(dr.currentRules)).Debug("setRules: redirect rules")
 
 	for _, rule := range dr.redirect.rules {
 		for _, dnsRule := range rule.DNS {
@@ -130,7 +135,7 @@ func createDNSRedirect(r *Redirect, conf dnsConfiguration, endpointInfoRegistry 
 	}
 
 	log.WithFields(logrus.Fields{
-		"dnsRedirect": dr,
+		"dnsRedirect": logfields.Repr(dr),
 		"conf":        conf,
 	}).Debug("Creating DNS Proxy redirect")
 

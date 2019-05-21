@@ -24,9 +24,11 @@ import (
 	"github.com/cilium/cilium/api/v1/models"
 	"github.com/cilium/cilium/pkg/identity"
 	"github.com/cilium/cilium/pkg/labels"
+	"github.com/cilium/cilium/pkg/logging/logfields"
 	"github.com/cilium/cilium/pkg/policy/api"
 	"github.com/cilium/cilium/pkg/policy/trafficdirection"
 	"github.com/cilium/cilium/pkg/u8proto"
+	"github.com/sirupsen/logrus"
 )
 
 // L7DataMap contains a map of L7 rules per endpoint where key is a CachedSelector
@@ -219,6 +221,11 @@ func (l7 L7DataMap) addRulesForEndpoints(rules api.L7Rules, endpoints []CachedSe
 	if rules.Len() == 0 {
 		return
 	}
+
+	log.WithFields(logrus.Fields{
+		"rules":     logfields.Repr(rules),
+		"endpoints": endpoints,
+	}).Debug("addRulesForEndpoints")
 
 	for _, epsel := range endpoints {
 		l7[epsel] = rules
