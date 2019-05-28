@@ -1333,9 +1333,24 @@ func runDaemon() {
 	bootstrapStats.healthCheck.End(true)
 
 	d.startStatusCollector()
-
 	metricsErrs := initMetrics()
 
+	// Everything is ready; serve the Cilium API!
+	errs := d.configureAndStartServer()
+
+	select {
+	case err := <-metricsErrs:
+		if err != nil {
+			log.WithError(err).Fatal("Cannot start metrics server")
+		}
+	case err := <-errs:
+		if err != nil {
+			log.WithError(err).Fatal("Error returned from non-returning Serve() call")
+		}
+	}
+}
+
+func (d *Daemon) configureAndStartServer() chan error {
 	bootstrapStats.initAPI.Start()
 	api := d.instantiateAPI()
 
@@ -1368,16 +1383,7 @@ func runDaemon() {
 	bootstrapStats.overall.End(true)
 	bootstrapStats.updateMetrics()
 
-	select {
-	case err := <-metricsErrs:
-		if err != nil {
-			log.WithError(err).Fatal("Cannot start metrics server")
-		}
-	case err := <-errs:
-		if err != nil {
-			log.WithError(err).Fatal("Error returned from non-returning Serve() call")
-		}
-	}
+	return errs
 }
 
 func (d *Daemon) instantiateAPI() *restapi.CiliumAPI {
