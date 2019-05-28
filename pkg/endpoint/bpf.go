@@ -413,8 +413,6 @@ func (e *Endpoint) regenerateBPF(owner Owner, regenContext *regenerationContext)
 	<-datapathRegenCtxt.ctCleaned
 	stats.waitingForCTClean.End(true)
 
-	stats.prepareBuild.End(true)
-
 	compilationExecuted, err = e.realizeBPFState(regenContext)
 	if err != nil {
 		return datapathRegenCtxt.epInfoCache.revision, compilationExecuted, err
