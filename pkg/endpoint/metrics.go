@@ -65,6 +65,7 @@ type regenerationStatistics struct {
 	datapathRealization    loader.SpanStat
 	mapSync                spanstat.SpanStat
 	prepareBuild           spanstat.SpanStat
+	writeHeaderfile        spanstat.SpanStat
 }
 
 // SendMetrics sends the regeneration statistics for this endpoint to
@@ -95,6 +96,7 @@ func (s *regenerationStatistics) GetMap() map[string]*spanstat.SpanStat {
 		"proxyWaitForAck":        &s.proxyWaitForAck,
 		"mapSync":                &s.mapSync,
 		"prepareBuild":           &s.prepareBuild,
+		"headerfilePrep":         &s.writeHeaderfile,
 		logfields.BuildDuration:  &s.totalTime,
 	}
 	for k, v := range s.datapathRealization.GetMap() {

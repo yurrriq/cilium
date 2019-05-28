@@ -689,16 +689,20 @@ func (e *Endpoint) runPreCompilationSteps(owner Owner, regenContext *regeneratio
 	datapathRegenCtxt.revertStack.Push(revertFunc)
 	stats.proxyConfiguration.End(true)
 
+	stats.writeHeaderfile.Start()
+	// Generate header file specific to this endpoint for use in compiling
+	// BPF programs for this endpoint.
+	if err = e.writeHeaderfile(nextDir, owner); err != nil {
+		stats.writeHeaderfile.End(false)
+		return fmt.Errorf("unable to write header file: %s", err)
+	}
+
+	stats.writeHeaderfile.End(true)
+
 	stats.prepareBuild.Start()
 	defer func() {
 		stats.prepareBuild.End(preCompilationError == nil)
 	}()
-
-	// Generate header file specific to this endpoint for use in compiling
-	// BPF programs for this endpoint.
-	if err = e.writeHeaderfile(nextDir, owner); err != nil {
-		return fmt.Errorf("unable to write header file: %s", err)
-	}
 
 	// Avoid BPF program compilation and installation if the headerfile for the endpoint
 	// or the node have not changed.
