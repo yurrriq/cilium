@@ -305,6 +305,60 @@ Upgrading from >=1.4.0 to 1.5.y
    the ConfigMap before upgrading. Refer to the section :ref:`upgrade_configmap`
    on how to upgrade the `ConfigMap`.
 
+#. If you previously upgraded to v1.5, downgraded to <v1.5, and now want to
+   upgrade to v1.5 again, then you need to run the following `DaemonSet` before
+   doing the upgrade:
+
+    .. tabs::
+      .. group-tab:: K8s 1.10
+
+        .. parsed-literal::
+
+          $ kubectl apply -f \ |SCM_WEB|\/examples/kubernetes/1.10/cilium-rm-svc-v2.yaml
+
+      .. group-tab:: K8s 1.11
+
+        .. parsed-literal::
+
+          $ kubectl apply -f \ |SCM_WEB|\/examples/kubernetes/1.11/cilium-rm-svc-v2.yaml
+
+      .. group-tab:: K8s 1.12
+
+        .. parsed-literal::
+
+          $ kubectl apply -f \ |SCM_WEB|\/examples/kubernetes/1.12/cilium-rm-svc-v2.yaml
+
+      .. group-tab:: K8s 1.13
+
+        .. parsed-literal::
+
+          $ kubectl apply -f \ |SCM_WEB|\/examples/kubernetes/1.13/cilium-rm-svc-v2.yaml
+
+      .. group-tab:: K8s 1.14
+
+        .. parsed-literal::
+
+          $ kubectl apply -f \ |SCM_WEB|\/examples/kubernetes/1.14/cilium-rm-svc-v2.yaml
+
+
+
+   After running ``cilium-rm-svc-v2.yaml``, make sure the number of READY pods
+   is the same number of Cilium pods running.
+
+   .. code-block:: shell-session
+
+       kubectl get daemonset -n kube-system | grep cilium
+       NAME                      DESIRED   CURRENT   READY   UP-TO-DATE   AVAILABLE   NODE SELECTOR   AGE
+       cilium                    2         2         2       2            2           <none>          1h20m
+       cilium-rm-svc-v2          2         2         2       2            2           <none>          1m10s
+
+   Once the number of READY pods are the same, you can delete the ``cilium-rm-svc-v2``
+   `DaemonSet`.
+
+   .. code-block:: shell-session
+
+         kubectl -n kube-system delete ds cilium-rm-svc-v2
+
 #. Follow the standard procedures to perform the upgrade as described in :ref:`upgrade_minor`.
 
 New Default Values
