@@ -448,6 +448,12 @@ func init() {
 	flags.String(option.EncryptInterface, "", "Transparent encryption interface")
 	option.BindEnv(option.EncryptInterface)
 
+	flags.StringSlice(option.IPv4PodSubnets, []string{}, "List of IPv4 pod subnets")
+	option.BindEnv(option.IPv4PodSubnets)
+
+	flags.StringSlice(option.IPv6PodSubnets, []string{}, "List of IPv6 pod subnets")
+	option.BindEnv(option.IPv6PodSubnets)
+
 	flags.String(option.EndpointInterfaceNamePrefix, defaults.EndpointInterfaceNamePrefix, "Prefix of interface name shared by all endpoints")
 	option.BindEnv(option.EndpointInterfaceNamePrefix)
 

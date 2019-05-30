@@ -147,6 +147,9 @@ func (l *linuxDatapath) WriteNodeConfig(w io.Writer, cfg *datapath.LocalNodeConf
 	if option.Config.EnableIPSec {
 		fmt.Fprintf(fw, "#define ENABLE_IPSEC 1\n")
 	}
+	if option.Config.IsPodSubnetsDefined() {
+		fmt.Fprintf(fw, "#define IP_POOLS 1\n")
+	}
 	if !option.Config.InstallIptRules && option.Config.Masquerade {
 		fmt.Fprintf(fw, "#define ENABLE_MASQUERADE 1\n")
 		fmt.Fprintf(fw, "#define SNAT_MAPPING_MIN_PORT %d\n", nat.MinPortSnatDefault)

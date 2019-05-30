@@ -15,6 +15,8 @@
 package datapath
 
 import (
+	"net"
+
 	"github.com/cilium/cilium/pkg/cidr"
 	"github.com/cilium/cilium/pkg/mtu"
 	"github.com/cilium/cilium/pkg/node"
@@ -91,6 +93,9 @@ type LocalNodeConfiguration struct {
 
 	// EnableIPSec enables IPSec routes
 	EnableIPSec bool
+
+	IPv4PodSubnets []net.IPNet
+	IPv6PodSubnets []net.IPNet
 }
 
 // NodeHandler handles node related events such as addition, update or deletion

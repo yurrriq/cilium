@@ -431,6 +431,50 @@ func (n *linuxNodeHandler) NodeUpdate(oldNode, newNode node.Node) error {
 	return nil
 }
 
+func (n *linuxNodeHandler) enableCNIIPsec(v4CIDR []net.IPNet, v6CIDR []net.IPNet) {
+	var spi uint8
+	var err error
+	upsertIPsecLog := func(err error, spec string, loc, rem *net.IPNet, spi uint8) {
+		scopedLog := log.WithFields(logrus.Fields{
+			logfields.Reason: spec,
+			"local-ip":       loc,
+			"remote-ip":      rem,
+			"spi":            spi,
+		})
+		if err != nil {
+			scopedLog.WithError(err).Error("IPsec enable failed")
+		} else {
+			scopedLog.Debug("IPsec enabled")
+		}
+	}
+
+	n.replaceHostRules()
+
+	for _, cidr := range v4CIDR {
+		ipsecIPv4Wildcard := &net.IPNet{IP: net.ParseIP(wildcardIPv4), Mask: net.IPv4Mask(0, 0, 0, 0)}
+
+		n.replaceNodeIPSecInRoute(&cidr)
+		spi, err = ipsec.UpsertIPsecEndpoint(&cidr, ipsecIPv4Wildcard, ipsec.IPSecDirIn)
+		upsertIPsecLog(err, "CNI In IPv4", &cidr, ipsecIPv4Wildcard, spi)
+
+		n.replaceNodeIPSecOutRoute(&cidr)
+		spi, err = ipsec.UpsertIPsecEndpoint(ipsecIPv4Wildcard, &cidr, ipsec.IPSecDirOut)
+		upsertIPsecLog(err, "CNI Out IPv4", ipsecIPv4Wildcard, &cidr, spi)
+	}
+
+	for _, cidr := range v6CIDR {
+		ipsecIPv6Wildcard := &net.IPNet{IP: net.ParseIP(wildcardIPv6), Mask: net.CIDRMask(0, 0)}
+
+		n.replaceNodeIPSecInRoute(&cidr)
+		spi, err = ipsec.UpsertIPsecEndpoint(&cidr, ipsecIPv6Wildcard, ipsec.IPSecDirIn)
+		upsertIPsecLog(err, "CNI In IPv6", &cidr, ipsecIPv6Wildcard, spi)
+
+		n.replaceNodeIPSecOutRoute(&cidr)
+		spi, err := ipsec.UpsertIPsecEndpoint(ipsecIPv6Wildcard, &cidr, ipsec.IPSecDirOut)
+		upsertIPsecLog(err, "CNI Out IPv6", &cidr, ipsecIPv6Wildcard, spi)
+	}
+}
+
 func (n *linuxNodeHandler) enableIPsec(newNode *node.Node) {
 	var spi uint8
 	var err error
@@ -520,10 +564,14 @@ func (n *linuxNodeHandler) nodeUpdate(oldNode, newNode *node.Node, firstAddition
 		newKey = newNode.EncryptionKey
 	}
 
+	log.Warn("IPv4PodSubnets %d IPv6PodSubnets %d", len(n.nodeConfig.IPv4PodSubnets), len(n.nodeConfig.IPv6PodSubnets))
 	if newNode.IsLocal() {
 		if n.nodeConfig.EnableLocalNodeRoute {
 			n.updateOrRemoveNodeRoutes([]*cidr.CIDR{oldIP4Cidr}, []*cidr.CIDR{newNode.IPv4AllocCIDR})
 			n.updateOrRemoveNodeRoutes([]*cidr.CIDR{oldIP6Cidr}, []*cidr.CIDR{newNode.IPv6AllocCIDR})
+		}
+		if len(n.nodeConfig.IPv4PodSubnets) > 0 || len(n.nodeConfig.IPv6PodSubnets) > 0 {
+			n.enableCNIIPsec(n.nodeConfig.IPv4PodSubnets, n.nodeConfig.IPv6PodSubnets)
 		}
 		return nil
 	}

@@ -92,6 +92,8 @@ func NewNodeDiscovery(manager *nodemanager.Manager, mtuConfig mtu.Configuration)
 			EnableLocalNodeRoute:    enableLocalNodeRoute(),
 			AuxiliaryPrefixes:       auxPrefixes,
 			EnableIPSec:             option.Config.EnableIPSec,
+			IPv4PodSubnets:          option.Config.IPv4PodSubnets,
+			IPv6PodSubnets:          option.Config.IPv6PodSubnets,
 		},
 		LocalNode: node.Node{
 			Source: node.FromLocalNode,
