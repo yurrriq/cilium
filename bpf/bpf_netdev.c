@@ -359,7 +359,11 @@ static inline int handle_ipv4(struct __sk_buff *skb, __u32 src_identity)
 		__u8 key = get_min_encrypt_key(info->key);
 
 		set_encrypt_key(skb, key);
+#ifdef IP_POOLS
+		set_encrypt_dip(skb, tunnel_endpoint);
+#else
 		set_identity(skb, secctx);
+#endif
 	}
 #endif
 	return TC_ACT_OK;
@@ -398,12 +402,26 @@ static __always_inline int do_netdev(struct __sk_buff *skb, __u16 proto)
 			seclabel = get_identity(skb);
 			tunnel_endpoint = skb->cb[4];
 			skb->mark = 0;
-			bpf_clear_cb(skb);
-
 #ifdef ENCAP_IFINDEX
+			bpf_clear_cb(skb);
 			return __encap_and_redirect_with_nodeid(skb, tunnel_endpoint, seclabel, TRACE_PAYLOAD_LEN);
+#elif
+#ifdef IP_POOLS
+			/* When IP_POOLS is enabled ip addressees are not
+			 * assigned on a per node basis so lacking node
+			 * affinity we can not use IP address to assign the
+			 * destination IP. Instead rewrite it here from cb[].
+			 */
+			switch (proto) {
+			case bpf_htons(ETH_P_IPV4):
+				ipv4_load_daddr(skb, ETH_HLEN, tunnel_endpoint);
+				// do we need a dec_ttl here to rehash
+				break;
+			}
 #endif
+			bpf_clear_cb(skb);
 			return TC_ACT_OK;
+#endif
 		}
 	}
 #endif

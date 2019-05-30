@@ -325,7 +325,11 @@ pass_to_stack:
 #ifdef ENABLE_IPSEC
 	if (*dstID > WORLD_ID && encrypt_key) {
 		set_encrypt_key(skb, encrypt_key);
+#ifdef IP_POOLS
+		set_encrypt_dip(skb, tunnel_endpoint);
+#else
 		set_identity(skb, SECLABEL);
+#endif
 	}
 #endif
 #endif
@@ -618,7 +622,11 @@ pass_to_stack:
 #ifdef ENABLE_IPSEC
 	if (*dstID > WORLD_ID && encrypt_key) {
 		set_encrypt_key(skb, encrypt_key);
+#ifdef IP_POOLS
+		set_encrypt_dip(skb, tunnel_endpoint);
+#else
 		set_identity(skb, SECLABEL);
+#endif
 	}
 #endif
 #endif
