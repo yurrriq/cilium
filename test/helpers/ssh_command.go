@@ -166,8 +166,19 @@ func runCommand(session *ssh.Session, cmd *SSHCommand) (bool, error) {
 	outChan := copyWait(cmd.Stdout, stdout)
 
 	if err = session.Run(cmd.Path); err != nil {
+		ginkgo.By("session returned an error")
 		return false, err
 	}
+
+	ginkgo.By("session.Run returned without an error, indicating that session.Wait() completed!")
+	ginkgo.By("Calling wait again - this should hang!")
+	if err = session.Wait(); err != nil {
+		ginkgo.By("session.Wait() invoked for second time returned an error")
+		return false, err
+	}
+	ginkgo.By("session.Wait() invoked for second time did not return an error")
+
+	ginkgo.By("session.Wait() invoked for second time returned?")
 
 	if err = <-errChan; err != nil {
 		return true, err
